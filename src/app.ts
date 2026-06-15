@@ -1,10 +1,11 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 import { basename, relative } from "node:path";
 import { TUI, ProcessTerminal, matchesKey } from "@earendil-works/pi-tui";
 import { Browser } from "./browser.ts";
 import { ScrollView } from "./scroll-view.ts";
 import { renderMarkdown } from "./render.ts";
 import { findMarkdownFiles } from "./file-list.ts";
+import { VimEditor, type VimOptions } from "./editor/vim-editor.ts";
 
 // SGR mouse reporting (button + wheel). pi-tui's stdin buffer forwards these
 // sequences to the focused component; we just turn reporting on.
@@ -12,9 +13,9 @@ const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
 const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1006l";
 
 /**
- * Drives the interactive UI. Because pi-tui's TUI has no suspend/resume, we
- * tear the whole TUI down to launch an external editor and rebuild it fresh
- * afterwards — so the controller owns enough state to re-render any screen.
+ * Drives the interactive UI. Screens (browser, viewer, editor) are swapped as
+ * the single focused child of the TUI; the controller owns enough state to
+ * rebuild any screen on demand.
  */
 class App {
     private root: string;
@@ -23,6 +24,9 @@ class App {
     // One browser instance, kept alive across viewer trips so it remembers the
     // folder you were in.
     private browser: Browser | null = null;
+    // Editor view options (number/relativenumber). Session-only — markdown has
+    // no settings store of its own; toggles via :set persist until exit.
+    private editorOptions: VimOptions = { number: true, relativenumber: true };
 
     constructor(root: string) {
         this.root = root;
@@ -101,16 +105,29 @@ class App {
         tui.requestRender();
     }
 
-    /** Tear down the TUI, open the file in $EDITOR, then rebuild and re-show. */
+    /** Open the file in the in-app modal (vim) editor; `rebuild` re-shows after. */
     private edit(path: string, rebuild: () => void): void {
-        const editor = process.env.VISUAL || process.env.EDITOR || "vim";
-        this.teardownTui();
-        try {
-            Bun.spawnSync([editor, path], { stdin: "inherit", stdout: "inherit", stderr: "inherit" });
-        } catch {
-            // If the editor can't launch we still want the UI back.
-        }
-        rebuild();
+        const tui = this.tui ?? this.mountTui();
+        const title = relative(this.root, path) || basename(path);
+        const editor = new VimEditor({
+            title,
+            text: readFileSync(path, "utf8"),
+            filetype: "markdown",
+            options: this.editorOptions,
+            onOptionsChange: (opts) => {
+                this.editorOptions = opts;
+            },
+            requestRender: () => this.tui?.requestRender(),
+            onSave: (text) => {
+                writeFileSync(path, text);
+                return `written ${basename(path)}`;
+            },
+            onQuit: () => rebuild(),
+        });
+        tui.clear();
+        tui.addChild(editor);
+        tui.setFocus(editor);
+        tui.requestRender();
     }
 }
 
