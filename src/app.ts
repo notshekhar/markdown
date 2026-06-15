@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { basename, relative } from "node:path";
 import { TUI, ProcessTerminal, matchesKey } from "@earendil-works/pi-tui";
 import { Browser } from "./browser.ts";
 import { ScrollView } from "./scroll-view.ts";
@@ -11,8 +11,6 @@ import { findMarkdownFiles } from "./file-list.ts";
 const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
 const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1006l";
 
-type Screen = { kind: "browser" } | { kind: "viewer"; path: string };
-
 /**
  * Drives the interactive UI. Because pi-tui's TUI has no suspend/resume, we
  * tear the whole TUI down to launch an external editor and rebuild it fresh
@@ -20,13 +18,14 @@ type Screen = { kind: "browser" } | { kind: "viewer"; path: string };
  */
 class App {
     private root: string;
-    private files: string[];
     private tui: TUI | null = null;
     private quitting = false;
+    // One browser instance, kept alive across viewer trips so it remembers the
+    // folder you were in.
+    private browser: Browser | null = null;
 
-    constructor(root: string, files: string[]) {
+    constructor(root: string) {
         this.root = root;
-        this.files = files;
         // Some terminals deliver Ctrl+C as a SIGINT signal rather than as \x03
         // input data; catch that path too so quitting always works.
         process.on("SIGINT", () => this.quit());
@@ -65,26 +64,27 @@ class App {
         process.exit(0);
     }
 
-    show(screen: Screen): void {
+    showBrowser(): void {
         const tui = this.tui ?? this.mountTui();
-        tui.clear();
-
-        if (screen.kind === "browser") {
-            const browser = new Browser(this.root, this.files);
-            browser.onOpen = (relativePath) => this.show({ kind: "viewer", path: relativePath });
-            browser.onQuit = () => this.quit();
-            tui.addChild(browser);
-            tui.setFocus(browser);
-        } else {
-            const full = join(this.root, screen.path);
-            const source = readFileSync(full, "utf8");
-            const viewer = new ScrollView(screen.path, (width) => renderMarkdown(source, width));
-            viewer.onBack = () => this.show({ kind: "browser" });
-            viewer.onEdit = () => this.edit(full, () => this.show(screen));
-            tui.addChild(viewer);
-            tui.setFocus(viewer);
+        if (!this.browser) {
+            this.browser = new Browser(this.root);
+            this.browser.onOpenFile = (absPath) => this.showViewer(absPath);
         }
+        tui.clear();
+        tui.addChild(this.browser);
+        tui.setFocus(this.browser);
+        tui.requestRender();
+    }
 
+    private showViewer(absPath: string): void {
+        const tui = this.tui ?? this.mountTui();
+        const title = relative(this.root, absPath) || basename(absPath);
+        const viewer = new ScrollView(title, (width) => renderMarkdown(readFileSync(absPath, "utf8"), width));
+        viewer.onBack = () => this.showBrowser();
+        viewer.onEdit = () => this.edit(absPath, () => this.showViewer(absPath));
+        tui.clear();
+        tui.addChild(viewer);
+        tui.setFocus(viewer);
         tui.requestRender();
     }
 
@@ -115,14 +115,13 @@ class App {
 }
 
 export function runBrowser(root: string): void {
-    const files = findMarkdownFiles(root);
-    if (files.length === 0) {
+    if (findMarkdownFiles(root).length === 0) {
         process.stderr.write(`No markdown files found under ${root}\n`);
         process.exit(1);
     }
-    new App(root, files).show({ kind: "browser" });
+    new App(root).showBrowser();
 }
 
 export function runViewer(filePath: string): void {
-    new App(filePath, []).showSingle(filePath);
+    new App(filePath).showSingle(filePath);
 }

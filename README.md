@@ -19,11 +19,17 @@ bun ./src/cli.ts <file.md>
 ## Usage
 
 ```bash
-md                 # browse markdown files in the current folder (interactive)
-md <dir>           # browse markdown files under <dir>
+md                 # browse the current folder (interactive)
+md <dir>           # browse under <dir>
 md <file.md>       # open a file in the interactive viewer
 md <file.md> -p    # print rendered output and exit (also used when piped)
+
+md update          # update to the latest version (alias: upgrade)
+md version         # print the version
 ```
+
+The browser shows folders and markdown files. Enter a folder to descend;
+`esc` walks back up to the parent and never quits (use Ctrl+C to quit).
 
 ### Interactive keys
 
@@ -34,10 +40,11 @@ md <file.md> -p    # print rendered output and exit (also used when piped)
 | `g` / `G`      | top / bottom      |
 | mouse wheel    | scroll            |
 | `e`            | edit in `$EDITOR` |
-| `enter`        | open (browser)    |
-| `esc` / `q`    | back / quit       |
+| `enter`        | open file / enter folder |
+| `esc`          | back (viewer → browser, folder → parent) |
+| `ctrl+c`       | quit              |
 
-Typing in the browser fuzzy-filters the file list.
+Typing in the browser fuzzy-filters the current folder.
 
 ## Features
 

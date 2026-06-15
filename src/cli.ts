@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { runBrowser, runViewer } from "./app.ts";
 import { renderMarkdown } from "./render.ts";
+import { getVersion, runUpgrade } from "./commands.ts";
 
 const HELP = `md — render markdown in your terminal
 
@@ -12,19 +13,45 @@ Usage:
   md <file.md>       Open a file in the interactive viewer
   md <file.md> -p    Print the rendered file and exit (no UI)
 
+Commands:
+  update, upgrade    Update md to the latest version
+  version            Print the version
+  help               Show this help
+
 Options:
   -p, --print        Print to stdout instead of the interactive viewer
+  -v, --version      Print the version
   -h, --help         Show this help
 
 Interactive keys:
   ↑/↓ or j/k         scroll          space/b   page down/up
-  g/G                top/bottom      q/esc     back / quit`;
+  g/G                top/bottom      e         edit in $EDITOR
+  enter              open            esc       back (folders) / quit`;
 
 function main(): void {
     const args = process.argv.slice(2);
+
     if (args.includes("-h") || args.includes("--help")) {
         process.stdout.write(`${HELP}\n`);
         return;
+    }
+    if (args.includes("-v") || args.includes("--version")) {
+        process.stdout.write(`${getVersion()}\n`);
+        return;
+    }
+
+    // Subcommands (mirrors pi: update/upgrade/version/help).
+    switch (args[0]) {
+        case "update":
+        case "upgrade":
+            runUpgrade({ force: args.includes("--force") });
+            return;
+        case "version":
+            process.stdout.write(`${getVersion()}\n`);
+            return;
+        case "help":
+            process.stdout.write(`${HELP}\n`);
+            return;
     }
 
     const printMode = args.includes("-p") || args.includes("--print");

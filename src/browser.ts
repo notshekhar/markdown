@@ -1,48 +1,83 @@
+import { basename, dirname, relative, resolve } from "node:path";
 import chalk from "chalk";
 import { type Component, SelectList, fuzzyFilter, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "./theme.ts";
+import { listDirectory } from "./file-list.ts";
+
+interface Entry {
+    value: string; // absolute path
+    label: string; // display name (folders end with "/")
+    isDir: boolean;
+}
 
 /**
- * A file browser: a SelectList plus type-to-filter (fuzzy). SelectList alone
- * handles navigation/enter/escape, so we layer the filter on top and rebuild
- * its items as the query changes.
+ * A directory browser. Folders and markdown files are listed for the current
+ * directory; entering a folder descends into it, and `esc` walks back up to the
+ * parent. At the root it does nothing — quitting is Ctrl+C only.
  */
 export class Browser implements Component {
-    private files: string[];
+    private root: string;
+    private currentDir: string;
     private filter = "";
     private list: SelectList;
-    private root: string;
+    private dirSet = new Set<string>();
 
-    public onOpen?: (relativePath: string) => void;
-    public onQuit?: () => void;
+    public onOpenFile?: (absPath: string) => void;
 
-    constructor(root: string, files: string[]) {
-        this.root = root;
-        this.files = files;
-        this.list = this.buildList(files);
-    }
-
-    // 0.79.4's SelectList has no setItems(), so we rebuild it when the query
-    // changes, rewiring the callbacks each time.
-    private buildList(files: string[]): SelectList {
-        const list = new SelectList(this.toItems(files), this.maxVisible(), getSelectListTheme());
-        list.onSelect = (item) => this.onOpen?.(item.value);
-        list.onCancel = () => this.onQuit?.();
-        return list;
+    constructor(root: string) {
+        this.root = resolve(root);
+        this.currentDir = this.root;
+        this.list = this.rebuild();
     }
 
     private maxVisible(): number {
         const rows = process.stdout.rows || 24;
-        return Math.max(3, rows - 4);
+        return Math.max(3, rows - 5);
     }
 
-    private toItems(files: string[]) {
-        return files.map((file) => ({ value: file, label: file }));
+    private entries(): Entry[] {
+        const { dirs, files } = listDirectory(this.currentDir);
+        return [
+            ...dirs.map((dir) => ({ value: dir, label: `${basename(dir)}/`, isDir: true })),
+            ...files.map((file) => ({ value: file, label: basename(file), isDir: false })),
+        ];
     }
 
-    private applyFilter(): void {
-        const matches = this.filter ? fuzzyFilter(this.files, this.filter, (f) => f) : this.files;
-        this.list = this.buildList(matches);
+    private rebuild(): SelectList {
+        let entries = this.entries();
+        this.dirSet = new Set(entries.filter((entry) => entry.isDir).map((entry) => entry.value));
+        if (this.filter) {
+            entries = fuzzyFilter(entries, this.filter, (entry) => entry.label);
+        }
+        const list = new SelectList(
+            entries.map((entry) => ({ value: entry.value, label: entry.label })),
+            this.maxVisible(),
+            getSelectListTheme(),
+        );
+        list.onSelect = (item) => this.select(item.value);
+        list.onCancel = () => this.goUp();
+        this.list = list;
+        return list;
+    }
+
+    private select(value: string): void {
+        if (this.dirSet.has(value)) {
+            this.currentDir = value;
+            this.filter = "";
+            this.rebuild();
+        } else {
+            this.onOpenFile?.(value);
+        }
+    }
+
+    private goUp(): void {
+        // At the root there is nowhere to go; esc never quits.
+        if (resolve(this.currentDir) === this.root) {
+            return;
+        }
+        this.currentDir = dirname(this.currentDir);
+        this.filter = "";
+        this.rebuild();
     }
 
     invalidate(): void {
@@ -50,40 +85,46 @@ export class Browser implements Component {
     }
 
     handleInput(data: string): void {
-        // Navigation, selection, and cancel belong to the list. It uses the
-        // (Kitty-aware) keybinding manager internally, so we forward the raw
-        // data once we've recognized the key.
-        if (
-            matchesKey(data, "up") ||
-            matchesKey(data, "down") ||
-            matchesKey(data, "enter") ||
-            matchesKey(data, "escape") ||
-            data.startsWith("\x1b[<")
-        ) {
+        if (matchesKey(data, "escape")) {
+            this.goUp();
+            return;
+        }
+        if (matchesKey(data, "up") || matchesKey(data, "down") || matchesKey(data, "enter")) {
+            this.list.handleInput?.(data);
+            return;
+        }
+        if (data.startsWith("\x1b[<")) {
             this.list.handleInput?.(data);
             return;
         }
         if (matchesKey(data, "backspace")) {
             this.filter = this.filter.slice(0, -1);
-            this.applyFilter();
+            this.rebuild();
             return;
         }
-        // Printable single characters extend the filter query.
         if (data.length === 1 && data >= " " && data !== "\x7f") {
             this.filter += data;
-            this.applyFilter();
+            this.rebuild();
             return;
         }
     }
 
     render(width: number): string[] {
-        const heading = chalk.cyan.bold(`  markdown · ${this.files.length} file${this.files.length === 1 ? "" : "s"}`);
+        const here = relative(this.root, this.currentDir);
+        const crumb = here ? `${basename(this.root)}/${here}` : basename(this.root);
+        const heading = chalk.cyan.bold(`  ${crumb}`);
+
         const queryLabel = chalk.gray("  filter: ");
         const query = this.filter ? chalk.cyan(this.filter) : chalk.gray("(type to search)");
+
+        const atRoot = resolve(this.currentDir) === this.root;
+        const back = atRoot ? "" : " · esc up";
+        const hint = chalk.gray(`  ↑/↓ move · enter open${back} · ctrl+c quit`);
+
         const lines = [padLine(heading, width), padLine(`${queryLabel}${query}`, width), ""];
         lines.push(...this.list.render(width));
         lines.push("");
-        lines.push(padLine(chalk.gray("  ↑/↓ move · enter open · esc quit"), width));
+        lines.push(padLine(hint, width));
         return lines;
     }
 }
