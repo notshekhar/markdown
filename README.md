@@ -24,14 +24,17 @@ Update later with `md update` (or re-run the installer). Uninstall with
 ## Usage
 
 ```bash
-md                 # browse the current folder (interactive)
-md <dir>           # browse under <dir>
-md <file.md>       # open a file in the interactive viewer
-md <file.md> -p    # print rendered output and exit (also used when piped)
+markdown                 # browse the current folder (interactive)
+markdown <dir>           # browse under <dir>
+markdown <file.md>       # open a file in the interactive viewer
+markdown <file.md> -p    # print rendered output and exit (also used when piped)
 
-md update          # update to the latest version (alias: upgrade)
-md version         # print the version
+markdown update          # update to the latest version (alias: upgrade)
+markdown version         # print the version
 ```
+
+The command is `markdown` (a `md` alias is also installed, but many shells
+already alias `md` to `mkdir`, which would shadow it).
 
 The browser shows folders and markdown files. Enter a folder to descend;
 `esc` walks back up to the parent and never quits (use Ctrl+C to quit).

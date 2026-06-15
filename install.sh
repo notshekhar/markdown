@@ -4,9 +4,11 @@
 #
 # Layout after install:
 #   $MD_HOME/                 (default: ~/.md-bin)
-#     ├── md                  (standalone binary; no node/bun needed)
+#     ├── markdown            (standalone binary; no node/bun needed)
 #     └── package.json        (version metadata)
-#   $BIN_DIR/md  → $MD_HOME/md   (symlink on PATH)
+#   $BIN_DIR/markdown → $MD_HOME/markdown   (symlink on PATH)
+#   $BIN_DIR/md       → $MD_HOME/markdown   (alias; may be shadowed by a
+#                                            shell alias for `md`)
 #
 # Env knobs:
 #   MD_REPO_SLUG   notshekhar/markdown   override repo
@@ -77,9 +79,10 @@ resolve_bin_dir() {
 }
 
 uninstall() {
-  bold "▶ Uninstalling md"
-  for link in "$HOME/.local/bin/md" "/usr/local/bin/md" "/opt/homebrew/bin/md" \
-              "${MD_BIN_DIR:+$MD_BIN_DIR/md}"; do
+  bold "▶ Uninstalling markdown"
+  for link in "$HOME/.local/bin/markdown" "/usr/local/bin/markdown" "/opt/homebrew/bin/markdown" \
+              "$HOME/.local/bin/md" "/usr/local/bin/md" "/opt/homebrew/bin/md" \
+              "${MD_BIN_DIR:+$MD_BIN_DIR/markdown}" "${MD_BIN_DIR:+$MD_BIN_DIR/md}"; do
     [ -n "$link" ] || continue
     { [ -L "$link" ] || [ -f "$link" ]; } && rm -f "$link" 2>/dev/null && dim "  removed $link" || true
   done
@@ -136,7 +139,7 @@ main() {
 
   bold "▶ Extracting"
   tar -xzf "$tar" -C "$scratch"
-  [ -x "$scratch/$target/md" ] || { err "tarball missing $target/md"; exit 1; }
+  [ -x "$scratch/$target/markdown" ] || { err "tarball missing $target/markdown"; exit 1; }
 
   if [ "$(uname -s)" = "Darwin" ] && command -v xattr >/dev/null 2>&1; then
     xattr -dr com.apple.quarantine "$scratch/$target" 2>/dev/null || true
@@ -150,7 +153,8 @@ main() {
   rm -rf "$scratch" 2>/dev/null || true
 
   local bin_dir; bin_dir="$(resolve_bin_dir)"
-  ln -sf "$MD_HOME/md" "$bin_dir/md"
+  ln -sf "$MD_HOME/markdown" "$bin_dir/markdown"
+  ln -sf "$MD_HOME/markdown" "$bin_dir/md"
   hash -r 2>/dev/null || true
 
   case ":$PATH:" in
@@ -158,8 +162,11 @@ main() {
     *) err "warning: $bin_dir is not on PATH — add it to your shell rc" ;;
   esac
 
-  "$MD_HOME/md" --version >/dev/null 2>&1 || { err "installed binary failed to run"; exit 1; }
-  bold "✓ Installed md $latest → $bin_dir/md"
+  "$MD_HOME/markdown" --version >/dev/null 2>&1 || { err "installed binary failed to run"; exit 1; }
+  bold "✓ Installed markdown $latest → $bin_dir/markdown"
+  if alias md >/dev/null 2>&1 || type md 2>/dev/null | grep -qiv "$bin_dir/md"; then
+    dim "  note: \`md\` is shadowed by a shell alias on this machine — use \`markdown\`."
+  fi
 }
 
 main "$@"

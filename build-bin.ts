@@ -2,8 +2,8 @@
 // Standalone binary build via `bun build --compile`. md is pure JS/TS, so any
 // target cross-compiles from any host (no native modules).
 //
-// Output: dist/bin/<target>/ containing `md` (or `md.exe`) and package.json,
-// plus dist/bin/md-<target>.tar.gz ready to upload to GitHub Releases.
+// Output: dist/bin/<target>/ containing `markdown` (or `markdown.exe`) and
+// package.json, plus dist/bin/md-<target>.tar.gz for GitHub Releases.
 
 import { readFileSync, mkdirSync, existsSync, rmSync, copyFileSync } from "node:fs";
 import { join } from "node:path";
@@ -49,7 +49,7 @@ const ext = target.includes("windows") ? ".exe" : "";
 
 const binDir = join(import.meta.dir, "dist", "bin");
 const stageDir = join(binDir, shortTarget);
-const binPath = join(stageDir, `md${ext}`);
+const binPath = join(stageDir, `markdown${ext}`);
 
 if (existsSync(stageDir)) {
     rmSync(stageDir, { recursive: true });

@@ -5,18 +5,18 @@ import { runBrowser, runViewer } from "./app.ts";
 import { renderMarkdown } from "./render.ts";
 import { getVersion, runUpgrade } from "./commands.ts";
 
-const HELP = `md — render markdown in your terminal
+const HELP = `markdown — render markdown in your terminal
 
 Usage:
-  md                 Browse markdown files in the current folder (interactive)
-  md <dir>           Browse markdown files under <dir>
-  md <file.md>       Open a file in the interactive viewer
-  md <file.md> -p    Print the rendered file and exit (no UI)
+  markdown                 Browse markdown files in the current folder
+  markdown <dir>           Browse markdown files under <dir>
+  markdown <file.md>       Open a file in the interactive viewer
+  markdown <file.md> -p    Print the rendered file and exit (no UI)
 
 Commands:
-  update, upgrade    Update md to the latest version
-  version            Print the version
-  help               Show this help
+  update, upgrade          Update to the latest version
+  version                  Print the version
+  help                     Show this help
 
 Options:
   -p, --print        Print to stdout instead of the interactive viewer
