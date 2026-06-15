@@ -4,17 +4,22 @@
 
 ## Install
 
+Prebuilt binary (no node/bun required):
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/notshekhar/markdown/main/install.sh | bash
+```
+
+From source:
+
 ```bash
 bun install
-bun run build        # compiles ./dist
-bun link             # exposes the `md` binary
+bun build-bin.ts     # standalone binary in dist/bin/<target>/md
+bun ./src/cli.ts <file.md>   # or just run it directly
 ```
 
-Or run straight from source:
-
-```bash
-bun ./src/cli.ts <file.md>
-```
+Update later with `md update` (or re-run the installer). Uninstall with
+`MD_UNINSTALL=1 curl -fsSL .../install.sh | bash`.
 
 ## Usage
 
