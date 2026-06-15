@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { type Component, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 
 type LineProvider = (width: number) => string[];
 
@@ -13,6 +13,9 @@ export class ScrollView implements Component {
     private offset = 0;
     private cachedWidth = -1;
     private cachedLines: string[] = [];
+    // Left/right gutter inside the preview. Some terminals add their own
+    // padding, but many (and VS Code's) sit flush against the edge.
+    private margin = 2;
 
     public onBack?: () => void;
     public onEdit?: () => void;
@@ -59,26 +62,26 @@ export class ScrollView implements Component {
     }
 
     handleInput(data: string): void {
-        const width = this.cachedWidth < 0 ? process.stdout.columns || 80 : this.cachedWidth;
+        const width = this.cachedWidth < 0 ? Math.max(1, (process.stdout.columns || 80) - this.margin * 2) : this.cachedWidth;
         const lines = this.getLines(width);
         const page = Math.max(1, this.viewportHeight() - 1);
 
-        if (data === "\x1b[A" || data === "k") {
+        if (matchesKey(data, "up") || matchesKey(data, "k")) {
             this.offset -= 1;
-        } else if (data === "\x1b[B" || data === "j") {
+        } else if (matchesKey(data, "down") || matchesKey(data, "j")) {
             this.offset += 1;
-        } else if (data === "\x1b[5~" || data === "b") {
+        } else if (matchesKey(data, "pageUp") || matchesKey(data, "b")) {
             this.offset -= page;
-        } else if (data === "\x1b[6~" || data === " " || data === "f") {
+        } else if (matchesKey(data, "pageDown") || matchesKey(data, "space") || matchesKey(data, "f")) {
             this.offset += page;
-        } else if (data === "g" || data === "\x1b[H") {
+        } else if (matchesKey(data, "g") || matchesKey(data, "home")) {
             this.offset = 0;
-        } else if (data === "G" || data === "\x1b[F") {
+        } else if (matchesKey(data, "shift+g") || matchesKey(data, "end")) {
             this.offset = this.maxOffset(lines.length);
-        } else if (data === "e") {
+        } else if (matchesKey(data, "e")) {
             this.onEdit?.();
             return;
-        } else if (data === "q" || data === "\x1b" || data === "\x7f") {
+        } else if (matchesKey(data, "escape") || matchesKey(data, "q") || matchesKey(data, "backspace")) {
             this.onBack?.();
             return;
         } else if (data.startsWith("\x1b[<")) {
@@ -108,7 +111,10 @@ export class ScrollView implements Component {
     }
 
     render(width: number): string[] {
-        const lines = this.getLines(width);
+        // Content is rendered into the gutter-reduced width, then indented.
+        const contentWidth = Math.max(1, width - this.margin * 2);
+        const gutter = " ".repeat(this.margin);
+        const lines = this.getLines(contentWidth);
         const height = this.viewportHeight();
         this.clampOffset(lines.length);
 
@@ -116,6 +122,7 @@ export class ScrollView implements Component {
         while (window.length < height) {
             window.push("");
         }
+        const body = window.map((line) => `${gutter}${line}`);
 
         const total = Math.max(1, lines.length);
         const shown = Math.min(this.offset + height, total);
@@ -124,9 +131,9 @@ export class ScrollView implements Component {
         const header = padLine(chalk.bgCyan.black.bold(` ${this.title} `), width);
         const rule = chalk.dim.gray("─".repeat(width));
         const hint = chalk.gray("↑/↓ scroll · space page · g/G top/bottom · e edit · esc back");
-        const footer = padLine(`  ${hint}  ${chalk.cyan(`${percent}%`)}`, width);
+        const footer = padLine(`${gutter}${hint}  ${chalk.cyan(`${percent}%`)}`, width);
 
-        return [header, rule, ...window, footer];
+        return [header, rule, ...body, footer];
     }
 }
 

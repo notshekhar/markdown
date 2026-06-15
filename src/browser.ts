@@ -1,5 +1,5 @@
 import chalk from "chalk";
-import { type Component, SelectList, fuzzyFilter, visibleWidth } from "@earendil-works/pi-tui";
+import { type Component, SelectList, fuzzyFilter, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "./theme.ts";
 
 /**
@@ -50,18 +50,20 @@ export class Browser implements Component {
     }
 
     handleInput(data: string): void {
-        // Navigation, selection, and cancel belong to the list.
+        // Navigation, selection, and cancel belong to the list. It uses the
+        // (Kitty-aware) keybinding manager internally, so we forward the raw
+        // data once we've recognized the key.
         if (
-            data === "\x1b[A" ||
-            data === "\x1b[B" ||
-            data === "\r" ||
-            data === "\x1b" ||
+            matchesKey(data, "up") ||
+            matchesKey(data, "down") ||
+            matchesKey(data, "enter") ||
+            matchesKey(data, "escape") ||
             data.startsWith("\x1b[<")
         ) {
             this.list.handleInput?.(data);
             return;
         }
-        if (data === "\x7f" || data === "\b") {
+        if (matchesKey(data, "backspace")) {
             this.filter = this.filter.slice(0, -1);
             this.applyFilter();
             return;

@@ -1,6 +1,6 @@
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
-import { TUI, ProcessTerminal } from "@earendil-works/pi-tui";
+import { TUI, ProcessTerminal, matchesKey } from "@earendil-works/pi-tui";
 import { Browser } from "./browser.ts";
 import { ScrollView } from "./scroll-view.ts";
 import { renderMarkdown } from "./render.ts";
@@ -22,19 +22,24 @@ class App {
     private root: string;
     private files: string[];
     private tui: TUI | null = null;
+    private quitting = false;
 
     constructor(root: string, files: string[]) {
         this.root = root;
         this.files = files;
+        // Some terminals deliver Ctrl+C as a SIGINT signal rather than as \x03
+        // input data; catch that path too so quitting always works.
+        process.on("SIGINT", () => this.quit());
     }
 
     private mountTui(): TUI {
         const tui = new TUI(new ProcessTerminal());
         this.tui = tui;
-        // Raw mode means Ctrl+C arrives as data (\x03), not SIGINT — quit on it
-        // globally so it works on every screen.
+        // Quit on Ctrl+C from any screen. Under the Kitty keyboard protocol it
+        // arrives as a CSI-u sequence (matchesKey), and as the raw \x03 byte
+        // otherwise — handle both.
         tui.addInputListener((data) => {
-            if (data === "\x03") {
+            if (matchesKey(data, "ctrl+c") || data === "\x03") {
                 this.quit();
                 return { consume: true };
             }
@@ -52,6 +57,10 @@ class App {
     }
 
     private quit(): void {
+        if (this.quitting) {
+            return;
+        }
+        this.quitting = true;
         this.teardownTui();
         process.exit(0);
     }
