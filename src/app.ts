@@ -31,6 +31,15 @@ class App {
     private mountTui(): TUI {
         const tui = new TUI(new ProcessTerminal());
         this.tui = tui;
+        // Raw mode means Ctrl+C arrives as data (\x03), not SIGINT — quit on it
+        // globally so it works on every screen.
+        tui.addInputListener((data) => {
+            if (data === "\x03") {
+                this.quit();
+                return { consume: true };
+            }
+            return undefined;
+        });
         process.stdout.write(ENABLE_MOUSE);
         tui.start();
         return tui;
