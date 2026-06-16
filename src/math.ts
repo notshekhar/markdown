@@ -140,13 +140,13 @@ function replaceMath(text: string): string {
     return out;
 }
 
-interface Segment {
+export interface Segment {
     text: string;
     code: boolean;
 }
 
 /** Split markdown into code and non-code segments so math/code don't collide. */
-function splitOutCode(markdown: string): Segment[] {
+export function splitOutCode(markdown: string): Segment[] {
     const segments: Segment[] = [];
     const fenceRe = /(^```[\s\S]*?^```|`[^`\n]*`)/gm;
     let last = 0;

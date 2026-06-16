@@ -1,6 +1,7 @@
 import { Markdown } from "@earendil-works/pi-tui";
 import { getMarkdownTheme } from "./theme.ts";
 import { renderMathInMarkdown } from "./math.ts";
+import { stripInternalAnchorLinks } from "./links.ts";
 import { renderMermaid } from "./mermaid.ts";
 
 export interface RenderOptions {
@@ -17,7 +18,8 @@ const MERMAID_FENCE = /^```mermaid[^\n]*\n([\s\S]*?)\n```$/gm;
 
 /** Render a full markdown document to styled terminal lines. */
 export function renderMarkdown(source: string, width: number, options: RenderOptions = {}): string[] {
-    const withMath = renderMathInMarkdown(source);
+    const withoutAnchorLinks = stripInternalAnchorLinks(source);
+    const withMath = renderMathInMarkdown(withoutAnchorLinks);
     const chunks = splitMermaid(withMath);
     const theme = getMarkdownTheme();
     const lines: string[] = [];
