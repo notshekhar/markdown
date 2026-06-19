@@ -3,6 +3,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { runBrowser, runViewer } from "./app.ts";
 import { renderMarkdown } from "./render.ts";
+import { prewarmHighlighter } from "./highlight.ts";
 import { getVersion, runUpgrade } from "./commands.ts";
 
 const HELP = `markdown — render markdown in your terminal
@@ -28,7 +29,7 @@ Interactive keys:
   g/G                top/bottom      e         edit in $EDITOR
   enter              open            esc       back (folders) / quit`;
 
-function main(): void {
+async function main(): Promise<void> {
     const args = process.argv.slice(2);
 
     if (args.includes("-h") || args.includes("--help")) {
@@ -83,6 +84,9 @@ function main(): void {
         // Mermaid image rendering shells out to the mermaid CLI (heavy: pulls a
         // headless browser), so it's opt-in via MD_MERMAID_IMAGES=1.
         const images = process.env.MD_MERMAID_IMAGES === "1";
+        // Load grammars for the languages this document uses before rendering,
+        // since highlightCode() runs synchronously inside the renderer.
+        await prewarmHighlighter(source);
         const lines = renderMarkdown(source, width, { images });
         process.stdout.write(`${lines.join("\n")}\n`);
         return;
@@ -91,4 +95,7 @@ function main(): void {
     runViewer(target);
 }
 
-main();
+main().catch((err) => {
+    process.stderr.write(`md: ${err instanceof Error ? err.message : String(err)}\n`);
+    process.exit(1);
+});

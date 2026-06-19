@@ -1,6 +1,6 @@
 {
     "name": "markdown",
-    "version": "0.2.2",
+    "version": "0.2.3",
     "description": "md — render markdown in your terminal with syntax highlighting, math, and mermaid.",
     "type": "module",
     "license": "MIT",
@@ -18,8 +18,8 @@
     "dependencies": {
         "@earendil-works/pi-tui": "^0.79.4",
         "chalk": "^5.5.0",
-        "highlight.js": "^11.11.1",
-        "marked": "^14.1.4"
+        "marked": "^14.1.4",
+        "shiki": "^4.2.0"
     },
     "devDependencies": {
         "@types/bun": "latest"

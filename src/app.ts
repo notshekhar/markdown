@@ -4,6 +4,7 @@ import { TUI, ProcessTerminal, matchesKey } from "@earendil-works/pi-tui";
 import { Browser } from "./browser.ts";
 import { ScrollView } from "./scroll-view.ts";
 import { renderMarkdown } from "./render.ts";
+import { prewarmHighlighter } from "./highlight.ts";
 import { findMarkdownFiles } from "./file-list.ts";
 import { VimEditor, type VimOptions } from "./editor/vim-editor.ts";
 
@@ -72,7 +73,7 @@ class App {
         const tui = this.tui ?? this.mountTui();
         if (!this.browser) {
             this.browser = new Browser(this.root);
-            this.browser.onOpenFile = (absPath) => this.showViewer(absPath);
+            this.browser.onOpenFile = (absPath) => void this.showViewer(absPath);
         }
         tui.clear();
         tui.addChild(this.browser);
@@ -80,12 +81,15 @@ class App {
         tui.requestRender();
     }
 
-    private showViewer(absPath: string): void {
+    private async showViewer(absPath: string): Promise<void> {
         const tui = this.tui ?? this.mountTui();
         const title = relative(this.root, absPath) || basename(absPath);
+        // Load the document's code-block grammars before the synchronous
+        // renderer runs (highlightCode falls back to plain text otherwise).
+        await prewarmHighlighter(readFileSync(absPath, "utf8"));
         const viewer = new ScrollView(title, (width) => renderMarkdown(readFileSync(absPath, "utf8"), width));
         viewer.onBack = () => this.showBrowser();
-        viewer.onEdit = () => this.edit(absPath, () => this.showViewer(absPath));
+        viewer.onEdit = () => this.edit(absPath, () => void this.showViewer(absPath));
         tui.clear();
         tui.addChild(viewer);
         tui.setFocus(viewer);
@@ -93,13 +97,14 @@ class App {
     }
 
     /** Single-file mode: there is no browser to fall back to, so back quits. */
-    showSingle(path: string): void {
+    async showSingle(path: string): Promise<void> {
         const tui = this.mountTui();
+        await prewarmHighlighter(readFileSync(path, "utf8"));
         const viewer = new ScrollView(basename(path), (width) => renderMarkdown(readFileSync(path, "utf8"), width));
         viewer.onBack = () => this.quit();
         // Rebuilding the whole single-file view re-mounts the TUI and re-reads
         // the (possibly edited) file from disk.
-        viewer.onEdit = () => this.edit(path, () => this.showSingle(path));
+        viewer.onEdit = () => this.edit(path, () => void this.showSingle(path));
         tui.addChild(viewer);
         tui.setFocus(viewer);
         tui.requestRender();
@@ -140,5 +145,5 @@ export function runBrowser(root: string): void {
 }
 
 export function runViewer(filePath: string): void {
-    new App(filePath).showSingle(filePath);
+    void new App(filePath).showSingle(filePath);
 }

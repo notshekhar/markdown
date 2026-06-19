@@ -1,134 +1,96 @@
-// Syntax highlighting: highlight.js HTML output → ANSI, ported from pi's
-// theme.ts. We load the full language set (~190 languages) rather than
-// `lib/common` (only ~36): a markdown viewer doesn't control which languages
-// appear in a document, and an unbundled language silently falls back to plain
-// gray (i.e. no highlighting at all) for things like dockerfile, elixir,
-// haskell, powershell, scala, terraform, etc.
+// Syntax highlighting via Shiki (TextMate grammars, the same engine VS Code
+// uses) → ANSI truecolor. Shiki bundles ~330 languages, so code blocks in
+// anything from dockerfile to elixir to terraform get real highlighting rather
+// than the flat fallback highlight.js/lib/common left them with.
+//
+// Shiki's highlighter is created asynchronously and loads grammars on demand,
+// but pi-tui's Markdown theme calls highlightCode() synchronously while it
+// renders. We bridge that gap with prewarmHighlighter(): callers scan a
+// document for the languages it uses and await them before rendering, after
+// which codeToTokens() is fully synchronous.
 
-import hljs from "highlight.js";
 import chalk from "chalk";
+import { createHighlighter, bundledLanguages, type BundledLanguage, type Highlighter } from "shiki";
+import { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 
-type Formatter = (s: string) => string;
-type HighlightTheme = Record<string, Formatter>;
+// Any theme works — we read each token's hex color and let chalk downsample it
+// to the terminal's color depth. github-dark reads well on dark terminals and
+// degrades gracefully elsewhere.
+const THEME = "github-dark";
 
-const highlightTheme: HighlightTheme = {
-    keyword: (s) => chalk.magenta(s),
-    built_in: (s) => chalk.cyan(s),
-    literal: (s) => chalk.yellow(s),
-    number: (s) => chalk.yellow(s),
-    string: (s) => chalk.green(s),
-    comment: (s) => chalk.gray(s),
-    function: (s) => chalk.blue(s),
-    title: (s) => chalk.blue(s),
-    class: (s) => chalk.cyan(s),
-    type: (s) => chalk.cyan(s),
-    attr: (s) => chalk.cyan(s),
-    variable: (s) => chalk.red(s),
-    params: (s) => chalk.red(s),
-    operator: (s) => chalk.white(s),
-    punctuation: (s) => chalk.white(s),
-    meta: (s) => chalk.gray(s),
-    "selector-tag": (s) => chalk.magenta(s),
-    "selector-class": (s) => chalk.cyan(s),
-    "selector-id": (s) => chalk.yellow(s),
-    section: (s) => chalk.blue.bold(s),
-    bullet: (s) => chalk.yellow(s),
-    symbol: (s) => chalk.yellow(s),
-    name: (s) => chalk.blue(s),
-};
+// The JS regex engine avoids shipping the Oniguruma WASM blob, which keeps the
+// `bun build --compile` binary self-contained and starts in a few ms.
+const engine = createJavaScriptRegexEngine();
 
-const ENTITIES: Record<string, string> = {
-    "&amp;": "&",
-    "&lt;": "<",
-    "&gt;": ">",
-    "&quot;": '"',
-    "&#x27;": "'",
-};
+let highlighter: Highlighter | null = null;
+let initPromise: Promise<Highlighter> | null = null;
+// Languages (canonical ids and aliases) the highlighter has grammars for.
+const loaded = new Set<string>();
 
-function formatterFor(scope: string): Formatter | undefined {
-    if (highlightTheme[scope]) {
-        return highlightTheme[scope];
-    }
-    const dot = scope.indexOf(".");
-    if (dot !== -1 && highlightTheme[scope.slice(0, dot)]) {
-        return highlightTheme[scope.slice(0, dot)];
-    }
-    const dash = scope.indexOf("-");
-    if (dash !== -1 && highlightTheme[scope.slice(0, dash)]) {
-        return highlightTheme[scope.slice(0, dash)];
-    }
-    return undefined;
+function isBundled(lang: string): lang is BundledLanguage {
+    return lang in bundledLanguages;
 }
 
-/** Convert hljs HTML span markup to ANSI. */
-function renderHighlightedHtml(html: string): string {
-    let output = "";
-    let textBuffer = "";
-    const scopes: Array<string | undefined> = [];
-
-    const flush = () => {
-        if (!textBuffer) {
-            return;
-        }
-        let formatter: Formatter | undefined;
-        for (let i = scopes.length - 1; i >= 0; i--) {
-            const scope = scopes[i];
-            if (scope) {
-                formatter = formatterFor(scope);
-                if (formatter) {
-                    break;
-                }
-            }
-        }
-        output += formatter ? formatter(textBuffer) : textBuffer;
-        textBuffer = "";
-    };
-
-    let i = 0;
-    while (i < html.length) {
-        if (html.startsWith("<span", i)) {
-            const end = html.indexOf(">", i + 5);
-            if (end !== -1) {
-                flush();
-                const tag = html.slice(i, end + 1);
-                const m = /class\s*=\s*"([^"]*)"/.exec(tag);
-                const cls = m?.[1]?.split(/\s+/).find((c) => c.startsWith("hljs-"));
-                scopes.push(cls ? cls.slice(5) : undefined);
-                i = end + 1;
-                continue;
-            }
-        }
-        if (html.startsWith("</span>", i)) {
-            flush();
-            scopes.pop();
-            i += 7;
-            continue;
-        }
-        if (html[i] === "&") {
-            const entity = Object.keys(ENTITIES).find((e) => html.startsWith(e, i));
-            if (entity) {
-                textBuffer += ENTITIES[entity];
-                i += entity.length;
-                continue;
-            }
-        }
-        textBuffer += html[i];
-        i++;
-    }
-    flush();
-    return output;
+/** Lowercase + validate a fence language; undefined if Shiki can't highlight it. */
+function normalize(lang: string | undefined): BundledLanguage | undefined {
+    const l = lang?.trim().toLowerCase();
+    return l && isBundled(l) ? l : undefined;
 }
 
+/** Create the singleton (once) and ensure the given valid langs are loaded. */
+async function ensureLoaded(langs: BundledLanguage[]): Promise<void> {
+    if (!highlighter) {
+        if (!initPromise) {
+            initPromise = createHighlighter({ themes: [THEME], langs, engine });
+        }
+        highlighter = await initPromise;
+        for (const l of highlighter.getLoadedLanguages()) loaded.add(l);
+        return;
+    }
+    const missing = langs.filter((l) => !loaded.has(l));
+    if (missing.length === 0) return;
+    await highlighter.loadLanguage(...missing);
+    for (const l of highlighter.getLoadedLanguages()) loaded.add(l);
+}
+
+const FENCE = /^[ \t]*(?:```+|~~~+)[ \t]*([\w#+.-]+)/gm;
+
+/**
+ * Preload every language used by the fenced code blocks in `source`, so the
+ * synchronous highlightCode() below can render them. Best-effort and safe to
+ * call repeatedly — failures just leave the affected blocks as plain text.
+ */
+export async function prewarmHighlighter(source: string): Promise<void> {
+    const langs = new Set<BundledLanguage>();
+    FENCE.lastIndex = 0;
+    let match: RegExpExecArray | null;
+    while ((match = FENCE.exec(source)) !== null) {
+        // mermaid is handled by its own renderer, not as a code block.
+        if (match[1].toLowerCase() === "mermaid") continue;
+        const lang = normalize(match[1]);
+        if (lang) langs.add(lang);
+    }
+    if (langs.size === 0) return;
+    try {
+        await ensureLoaded([...langs]);
+    } catch {
+        // Highlighting is a nicety; never let it break rendering.
+    }
+}
+
+/** Render a code block to styled terminal lines (one string per source line). */
 export function highlightCode(code: string, lang?: string): string[] {
-    // No valid language → dim plain text. Auto-detection is unreliable, so we
-    // never guess (mirrors pi).
-    const validLang = lang && hljs.getLanguage(lang) ? lang : undefined;
-    if (!validLang) {
+    const l = normalize(lang);
+    // No highlighter yet, or an unknown/not-yet-loaded language → dim plain
+    // text. We never guess a language (auto-detection is unreliable).
+    if (!highlighter || !l || !loaded.has(l)) {
         return code.split("\n").map((line) => chalk.gray(line));
     }
     try {
-        const html = hljs.highlight(code, { language: validLang, ignoreIllegals: true }).value;
-        return renderHighlightedHtml(html).split("\n");
+        const { tokens } = highlighter.codeToTokens(code, { lang: l, theme: THEME });
+        return tokens.map((line) =>
+            line.map((token) => (token.color ? chalk.hex(token.color)(token.content) : token.content)).join(""),
+        );
     } catch {
         return code.split("\n").map((line) => chalk.gray(line));
     }
