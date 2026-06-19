@@ -59,7 +59,8 @@ Typing in the browser fuzzy-filters the current folder.
 - **Markdown** — headings, lists, tables, blockquotes, links, inline styles.
 - **Syntax highlighting** — [Shiki](https://shiki.style) (the highlighter
   behind VS Code) with ~330 languages, mapped to terminal colors (truecolor
-  where supported, gracefully downsampled otherwise).
+  where supported, gracefully downsampled otherwise). Code blocks with no
+  language are auto-detected; prose-y blocks are left plain.
 - **Math** — `$inline$`, `$$display$$`, and `\(...\)` / `\[...\]` rendered to Unicode.
 - **Mermaid** — `graph`/`flowchart` diagrams drawn as labeled flows. Set
   `MD_MERMAID_IMAGES=1` to render diagrams as inline images via the mermaid CLI
