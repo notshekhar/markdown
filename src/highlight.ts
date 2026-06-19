@@ -1,8 +1,11 @@
 // Syntax highlighting: highlight.js HTML output → ANSI, ported from pi's
-// theme.ts. We highlight against the common language set (~35 languages),
-// which covers every extension we map in getLanguageFromPath.
+// theme.ts. We load the full language set (~190 languages) rather than
+// `lib/common` (only ~36): a markdown viewer doesn't control which languages
+// appear in a document, and an unbundled language silently falls back to plain
+// gray (i.e. no highlighting at all) for things like dockerfile, elixir,
+// haskell, powershell, scala, terraform, etc.
 
-import hljs from "highlight.js/lib/common";
+import hljs from "highlight.js";
 import chalk from "chalk";
 
 type Formatter = (s: string) => string;
