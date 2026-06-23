@@ -101,6 +101,8 @@ class App {
         const viewer = new ScrollView(title, (width) => renderMarkdown(readFileSync(absPath, "utf8"), width));
         viewer.onBack = () => this.showBrowser();
         viewer.onEdit = () => this.edit(absPath, () => void this.showViewer(absPath));
+        viewer.getSource = () => readFileSync(absPath, "utf8");
+        viewer.onReplaceSource = (text) => writeFileSync(absPath, text);
         tui.clear();
         tui.addChild(viewer);
         tui.setFocus(viewer);
@@ -113,6 +115,8 @@ class App {
         await prewarmHighlighter(readFileSync(path, "utf8"));
         const viewer = new ScrollView(basename(path), (width) => renderMarkdown(readFileSync(path, "utf8"), width));
         viewer.onBack = () => this.quit();
+        viewer.getSource = () => readFileSync(path, "utf8");
+        viewer.onReplaceSource = (text) => writeFileSync(path, text);
         // Rebuilding the whole single-file view re-mounts the TUI and re-reads
         // the (possibly edited) file from disk.
         viewer.onEdit = () => this.edit(path, () => void this.showSingle(path));

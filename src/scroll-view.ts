@@ -11,6 +11,10 @@ interface Match {
     len: number;
 }
 
+/** normal = case-insensitive substring, exact = case-sensitive, regex = JS regexp. */
+type SearchMode = "normal" | "exact" | "regex";
+const SEARCH_MODES: SearchMode[] = ["normal", "exact", "regex"];
+
 const HSTEP = 8;
 /** SGR codes used to mark search hits (current vs the rest). */
 const ANSI = /\x1b\[[0-9;]*m/g;
@@ -44,13 +48,28 @@ export class ScrollView implements Component {
     // ── search state ─────────────────────────────────────────────────────────
     private searching = false; // typing a query in the footer
     private query = "";
+    /** Caret position within `query` (0..query.length) while editing it. */
+    private queryCursor = 0;
     private matches: Match[] = [];
     private matchIndex = 0;
     /** Width the current `matches` were computed for; recompute when it changes. */
     private matchWidth = -1;
+    /** How the query is interpreted; cycled with Tab. Persists across searches. */
+    private searchMode: SearchMode = "normal";
+    /** True when a regex query failed to compile (shown in the footer). */
+    private badPattern = false;
+    // ── replace state ─────────────────────────────────────────────────────────
+    private replacing = false; // editing the replacement field in the footer
+    private replacement = "";
+    private replacementCursor = 0;
+    /** Transient one-line status (e.g. "replaced 4"), cleared on the next key. */
+    private message = "";
 
     public onBack?: () => void;
     public onEdit?: () => void;
+    /** Source text + writer for find-and-replace; absent → replace is disabled. */
+    public getSource?: () => string;
+    public onReplaceSource?: (text: string) => void;
 
     constructor(title: string, provider: LineProvider) {
         this.title = title;
@@ -109,10 +128,15 @@ export class ScrollView implements Component {
         const width = this.cachedWidth < 0 ? Math.max(1, (process.stdout.columns || 80) - this.margin * 2) : this.cachedWidth;
         const lines = this.getLines(width);
         const page = Math.max(1, this.viewportHeight() - 1);
+        this.message = ""; // any keypress dismisses the transient status line
 
-        // While typing a query, the footer owns the keyboard.
+        // While editing the find/replace fields, the footer owns the keyboard.
         if (this.searching) {
             this.handleSearchInput(data, width);
+            return;
+        }
+        if (this.replacing) {
+            this.handleReplaceInput(data, width);
             return;
         }
 
@@ -135,6 +159,9 @@ export class ScrollView implements Component {
             this.offset = this.maxOffset(lines.length);
         } else if (matchesKey(data, "shift+f") || data === "/") {
             this.openSearch(width);
+            return;
+        } else if (matchesKey(data, "shift+r") && this.onReplaceSource && this.query) {
+            this.openReplace(width);
             return;
         } else if (this.matches.length > 0 && (matchesKey(data, "n") || matchesKey(data, "enter"))) {
             this.step(1);
@@ -172,20 +199,29 @@ export class ScrollView implements Component {
     // ── search ────────────────────────────────────────────────────────────────
     private openSearch(width: number): void {
         this.searching = true;
+        this.replacing = false;
+        this.queryCursor = this.query.length;
         this.recomputeMatches(width);
     }
 
     private clearSearch(): void {
         this.searching = false;
+        this.replacing = false;
         this.query = "";
+        this.queryCursor = 0;
         this.matches = [];
         this.matchIndex = 0;
         this.matchWidth = -1;
+        this.badPattern = false;
     }
 
     private handleSearchInput(data: string, width: number): void {
         if (matchesKey(data, "escape")) {
             this.clearSearch();
+        } else if (matchesKey(data, "tab") || data === "\t") {
+            // Cycle normal → exact → regex without disturbing the query.
+            this.searchMode = SEARCH_MODES[(SEARCH_MODES.indexOf(this.searchMode) + 1) % SEARCH_MODES.length];
+            this.recomputeMatches(width);
         } else if (matchesKey(data, "enter")) {
             // Commit the query and jump to the first hit at/after the viewport.
             this.searching = false;
@@ -193,27 +229,123 @@ export class ScrollView implements Component {
                 this.matchIndex = this.nearestMatch();
                 this.scrollToMatch(width);
             }
-        } else if (matchesKey(data, "backspace")) {
-            this.query = this.query.slice(0, -1);
-            this.recomputeMatches(width);
-        } else if (data.length === 1 && data >= " " && data !== "\x7f") {
-            this.query += data;
-            this.recomputeMatches(width);
+        } else {
+            const edited = editLine(this.query, this.queryCursor, data);
+            if (edited) {
+                this.query = edited.text;
+                this.queryCursor = edited.cursor;
+                if (edited.changed) this.recomputeMatches(width);
+            }
         }
     }
 
-    /** Find every occurrence of the query (case-insensitive) across all lines. */
+    // ── replace ───────────────────────────────────────────────────────────────
+    /** Enter the replacement field; the find pattern is the current query. */
+    private openReplace(width: number): void {
+        this.searching = false;
+        this.replacing = true;
+        this.replacementCursor = this.replacement.length;
+        this.recomputeMatches(width); // refresh the match count shown alongside
+    }
+
+    private handleReplaceInput(data: string, width: number): void {
+        if (matchesKey(data, "escape")) {
+            this.replacing = false; // keep the find + matches; just leave replace
+        } else if (matchesKey(data, "tab") || data === "\t") {
+            this.searching = true; // hop back to edit the find field
+            this.replacing = false;
+            this.queryCursor = this.query.length;
+        } else if (matchesKey(data, "enter")) {
+            this.applyReplace();
+        } else {
+            const edited = editLine(this.replacement, this.replacementCursor, data);
+            if (edited) {
+                this.replacement = edited.text;
+                this.replacementCursor = edited.cursor;
+            }
+        }
+    }
+
+    /**
+     * Replace every match in the *source* document and write it back. Regex mode
+     * honours `$1`/`$2` backreferences (JS semantics, same as VS Code); literal
+     * modes insert the replacement verbatim. The provider re-reads the file on
+     * the next render, so the view refreshes itself.
+     */
+    private applyReplace(): void {
+        if (!this.getSource || !this.onReplaceSource) {
+            this.message = "replace unavailable";
+            return;
+        }
+        if (!this.query) {
+            this.message = "no search pattern";
+            return;
+        }
+        let re: RegExp;
+        let replacement = this.replacement;
+        try {
+            if (this.searchMode === "regex") {
+                re = new RegExp(this.query, "gi"); // case-insensitive, matching the find
+            } else {
+                const flags = this.searchMode === "exact" ? "g" : "gi";
+                re = new RegExp(escapeRegExp(this.query), flags);
+                replacement = replacement.replace(/\$/g, "$$$$"); // literal $ (no backrefs)
+            }
+        } catch {
+            this.badPattern = true;
+            this.message = "bad pattern";
+            return;
+        }
+        const source = this.getSource();
+        const count = (source.match(re) ?? []).length;
+        if (count === 0) {
+            this.message = "no matches";
+            return;
+        }
+        try {
+            this.onReplaceSource(source.replace(re, replacement));
+        } catch (err) {
+            this.message = `write failed: ${(err as Error).message}`;
+            return;
+        }
+        this.invalidate(); // force a re-read + re-render of the edited file
+        this.replacing = false;
+        this.query = "";
+        this.queryCursor = 0;
+        this.replacement = "";
+        this.replacementCursor = 0;
+        this.matches = [];
+        this.matchIndex = 0;
+        this.message = `replaced ${count}`;
+    }
+
+    /** Find every occurrence of the query across all lines, per the active mode. */
     private recomputeMatches(width: number): void {
         this.getLines(width); // ensure plainLines are current for this width
         this.matches = [];
         this.matchWidth = width;
-        const needle = this.query.toLowerCase();
-        if (!needle) {
+        this.badPattern = false;
+        if (!this.query) {
             this.matchIndex = 0;
             return;
         }
+        if (this.searchMode === "regex") {
+            this.collectRegexMatches();
+        } else {
+            this.collectLiteralMatches(this.searchMode === "exact");
+        }
+        // Keep the selection near where the user is looking.
+        this.matchIndex = this.matches.length > 0 ? this.nearestMatch() : 0;
+        if (this.matches.length > 0) {
+            this.scrollToMatch(width);
+        }
+    }
+
+    /** Plain substring search; case-sensitive in exact mode, folded otherwise. */
+    private collectLiteralMatches(caseSensitive: boolean): void {
+        const needle = caseSensitive ? this.query : this.query.toLowerCase();
         this.plainLines.forEach((line, lineIdx) => {
-            const hay = line.toLowerCase();
+            const hay = caseSensitive ? line : line.toLowerCase();
             let from = 0;
             for (;;) {
                 const at = hay.indexOf(needle, from);
@@ -222,11 +354,28 @@ export class ScrollView implements Component {
                 from = at + needle.length;
             }
         });
-        // Keep the selection near where the user is looking.
-        this.matchIndex = this.matches.length > 0 ? this.nearestMatch() : 0;
-        if (this.matches.length > 0) {
-            this.scrollToMatch(width);
+    }
+
+    /** Regex search (case-insensitive, global). Invalid patterns match nothing. */
+    private collectRegexMatches(): void {
+        let re: RegExp;
+        try {
+            re = new RegExp(this.query, "gi");
+        } catch {
+            this.badPattern = true;
+            return;
         }
+        this.plainLines.forEach((line, lineIdx) => {
+            re.lastIndex = 0;
+            let m: RegExpExecArray | null;
+            while ((m = re.exec(line)) !== null) {
+                if (m[0].length === 0) {
+                    re.lastIndex++; // zero-width match (e.g. `a*`) — step past to avoid a loop
+                    continue;
+                }
+                this.matches.push({ line: lineIdx, col: m.index, len: m[0].length });
+            }
+        });
     }
 
     /** Index of the first hit on or after the current top of the viewport. */
@@ -313,19 +462,31 @@ export class ScrollView implements Component {
     }
 
     private footer(percent: number): string {
+        const mode = chalk.magenta(`${this.searchMode}`);
+        const find = `${chalk.cyan("/")}${mode} `;
+        if (this.replacing) {
+            const findField = `${find}${this.query}`;
+            const replField = `${chalk.cyan("→")} ${caret(this.replacement, this.replacementCursor)}`;
+            return `${findField}  ${replField}  ${chalk.cyan(this.matchCount())}  ${chalk.gray("enter replace all · tab find · esc cancel")}`;
+        }
         if (this.searching) {
             const count = this.query ? chalk.cyan(`  ${this.matchCount()}`) : "";
-            return `${chalk.cyan("/")} ${this.query}${chalk.cyan("▏")}${count}  ${chalk.gray("enter next · esc cancel")}`;
+            return `${find}${caret(this.query, this.queryCursor)}${count}  ${chalk.gray("tab mode · enter find · esc cancel")}`;
+        }
+        if (this.message) {
+            return chalk.cyan(this.message);
         }
         if (this.matches.length > 0 || this.query) {
-            const hint = chalk.gray("n/N next/prev · esc clear");
-            return `${chalk.cyan("/")} ${this.query}  ${chalk.cyan(this.matchCount())}  ${hint}  ${chalk.cyan(`${percent}%`)}`;
+            const repl = this.onReplaceSource ? " · R replace" : "";
+            const hint = chalk.gray(`n/N next/prev${repl} · esc clear`);
+            return `${find}${this.query}  ${chalk.cyan(this.matchCount())}  ${hint}  ${chalk.cyan(`${percent}%`)}`;
         }
         const hint = chalk.gray("↑/↓ scroll · ←/→ pan · g/G top/bottom · / find · e edit · esc back");
         return `${hint}  ${chalk.cyan(`${percent}%`)}`;
     }
 
     private matchCount(): string {
+        if (this.badPattern) return "bad pattern";
         if (this.matches.length === 0) return this.query ? "no matches" : "";
         return `[${this.matchIndex + 1}/${this.matches.length}]`;
     }
@@ -358,4 +519,39 @@ function highlightLine(styled: string, plain: string, ranges: Match[], current: 
 function padLine(text: string, width: number): string {
     const pad = Math.max(0, width - visibleWidth(text));
     return text + " ".repeat(pad);
+}
+
+/** Render a one-line input field with a visible caret at `cursor`. */
+function caret(text: string, cursor: number): string {
+    const at = Math.max(0, Math.min(cursor, text.length));
+    return text.slice(0, at) + chalk.cyan("▏") + text.slice(at);
+}
+
+/**
+ * Apply one key to a single-line text field (the find/replace inputs): cursor
+ * motion, insert, and delete. Returns the new `{ text, cursor }` plus whether
+ * the text actually changed, or null when the key isn't an edit/motion key.
+ */
+function editLine(text: string, cursor: number, data: string): { text: string; cursor: number; changed: boolean } | null {
+    const move = (c: number) => ({ text, cursor: Math.max(0, Math.min(text.length, c)), changed: false });
+    if (matchesKey(data, "left") || matchesKey(data, "ctrl+b")) return move(cursor - 1);
+    if (matchesKey(data, "right") || matchesKey(data, "ctrl+f")) return move(cursor + 1);
+    if (matchesKey(data, "home") || matchesKey(data, "ctrl+a")) return move(0);
+    if (matchesKey(data, "end") || matchesKey(data, "ctrl+e")) return move(text.length);
+    if (matchesKey(data, "backspace")) {
+        if (cursor === 0) return { text, cursor, changed: false };
+        return { text: text.slice(0, cursor - 1) + text.slice(cursor), cursor: cursor - 1, changed: true };
+    }
+    if (matchesKey(data, "delete")) {
+        if (cursor >= text.length) return { text, cursor, changed: false };
+        return { text: text.slice(0, cursor) + text.slice(cursor + 1), cursor, changed: true };
+    }
+    if (data.length === 1 && data >= " " && data !== "\x7f") {
+        return { text: text.slice(0, cursor) + data + text.slice(cursor), cursor: cursor + 1, changed: true };
+    }
+    return null;
+}
+
+function escapeRegExp(s: string): string {
+    return s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }

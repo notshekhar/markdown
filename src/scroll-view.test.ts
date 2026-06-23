@@ -17,6 +17,18 @@ function type(v: ScrollView, text: string): void {
     for (const ch of text) v.handleInput(ch);
 }
 
+/** A viewer whose source is an in-memory string, wired for find-and-replace. */
+function replViewer(initial: string, width = 80): { v: ScrollView; store: { text: string } } {
+    const store = { text: initial };
+    const v = new ScrollView("t", () => store.text.split("\n"));
+    v.getSource = () => store.text;
+    v.onReplaceSource = (t) => {
+        store.text = t;
+    };
+    v.render(width);
+    return { v, store };
+}
+
 test("clamps every body line to the viewport width (no wrap on wide content)", () => {
     const wide = "x".repeat(500);
     const v = viewer([wide, chalk.red("y".repeat(500))]);
@@ -84,6 +96,84 @@ test("slash opens search just like Shift+F", () => {
     v.handleInput("/");
     type(v, "needle");
     expect(strip(v.render(80).at(-1) ?? "")).toContain("[1/2]");
+});
+
+test("normal mode is case-insensitive; Tab → exact makes it case-sensitive", () => {
+    const v = viewer(["Foo and foo and FOO"]);
+    v.handleInput("/");
+    type(v, "foo");
+    expect(strip(v.render(80).at(-1) ?? "")).toContain("[1/3]"); // normal: all three
+    v.handleInput("\t"); // → exact (case-sensitive)
+    const footer = strip(v.render(80).at(-1) ?? "");
+    expect(footer).toContain("exact");
+    expect(footer).toContain("[1/1]"); // only the lowercase "foo"
+});
+
+test("regex mode matches a pattern", () => {
+    const v = viewer(["v1.2.3 and v10.20.30 here"]);
+    v.handleInput("/");
+    type(v, "v\\d+");
+    v.handleInput("\t"); // normal → exact
+    v.handleInput("\t"); // exact → regex
+    const footer = strip(v.render(80).at(-1) ?? "");
+    expect(footer).toContain("regex");
+    expect(footer).toContain("[1/2]"); // v1 and v10
+});
+
+test("invalid regex reports a bad pattern instead of throwing", () => {
+    const v = viewer(["anything"]);
+    v.handleInput("/");
+    v.handleInput("\t");
+    v.handleInput("\t"); // → regex
+    type(v, "("); // unbalanced
+    expect(strip(v.render(80).at(-1) ?? "")).toContain("bad pattern");
+});
+
+test("search field supports mid-string cursor editing", () => {
+    const v = viewer(["abc here"]);
+    v.handleInput("/");
+    type(v, "ac");
+    v.handleInput("\x1b[D"); // left → caret between a and c
+    type(v, "b"); // insert → "abc" (not "acb")
+    v.handleInput("\r"); // commit
+    expect(strip(v.render(80).at(-1) ?? "")).toContain("[1/1]");
+});
+
+test("replace rewrites the source (literal)", () => {
+    const { v, store } = replViewer("the fox and the fox");
+    v.handleInput("/");
+    type(v, "fox");
+    v.handleInput("\r"); // commit find
+    v.handleInput("R"); // Shift+R → open replace
+    type(v, "cat");
+    v.handleInput("\r"); // apply
+    expect(store.text).toBe("the cat and the cat");
+    expect(strip(v.render(80).at(-1) ?? "")).toContain("replaced 2");
+});
+
+test("regex replace honours $1/$2 backreferences (VS Code style)", () => {
+    const { v, store } = replViewer("12,34 and 56,78");
+    v.handleInput("/");
+    v.handleInput("\t"); // normal → exact
+    v.handleInput("\t"); // exact → regex
+    type(v, "(\\d+),(\\d+)");
+    v.handleInput("\r"); // commit find
+    v.handleInput("R"); // open replace
+    type(v, "$1$2");
+    v.handleInput("\r"); // apply
+    expect(store.text).toBe("1234 and 5678");
+});
+
+test("replace with no matches leaves the source untouched", () => {
+    const { v, store } = replViewer("nothing to see");
+    v.handleInput("/");
+    type(v, "zzz");
+    v.handleInput("\r");
+    v.handleInput("R");
+    type(v, "x");
+    v.handleInput("\r");
+    expect(store.text).toBe("nothing to see");
+    expect(strip(v.render(80).at(-1) ?? "")).toContain("no matches");
 });
 
 test("horizontal pan reveals content past the right edge", () => {
