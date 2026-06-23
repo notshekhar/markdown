@@ -12,6 +12,12 @@ import { VimEditor, type VimOptions } from "./editor/vim-editor.ts";
 // sequences to the focused component; we just turn reporting on.
 const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
 const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1006l";
+// Alternate screen buffer (like vim/less). The viewer paints into its own
+// isolated full-screen region instead of the normal scrollback, so repaints
+// don't jostle prior shell output and the terminal's own scrollback search
+// can't desync the differential renderer. Restored on exit.
+const ENTER_ALT = "\x1b[?1049h";
+const EXIT_ALT = "\x1b[?1049l";
 
 /**
  * Drives the interactive UI. Screens (browser, viewer, editor) are swapped as
@@ -34,6 +40,8 @@ class App {
         // Some terminals deliver Ctrl+C as a SIGINT signal rather than as \x03
         // input data; catch that path too so quitting always works.
         process.on("SIGINT", () => this.quit());
+        // Restore the terminal (mouse + main screen) even on an unexpected exit.
+        process.on("exit", () => process.stdout.write(DISABLE_MOUSE + EXIT_ALT));
     }
 
     private mountTui(): TUI {
@@ -49,14 +57,17 @@ class App {
             }
             return undefined;
         });
+        process.stdout.write(ENTER_ALT);
         process.stdout.write(ENABLE_MOUSE);
         tui.start();
+        tui.requestRender(true); // clear the fresh alt-screen and paint from the top
         return tui;
     }
 
     private teardownTui(): void {
         process.stdout.write(DISABLE_MOUSE);
         this.tui?.stop();
+        process.stdout.write(EXIT_ALT);
         this.tui = null;
     }
 
