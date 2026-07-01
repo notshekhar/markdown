@@ -8,16 +8,17 @@ import { prewarmHighlighter } from "./highlight.ts";
 import { findMarkdownFiles } from "./file-list.ts";
 import { VimEditor, type VimOptions } from "./editor/vim-editor.ts";
 
-// SGR mouse reporting (button + wheel). pi-tui's stdin buffer forwards these
-// sequences to the focused component; we just turn reporting on.
-const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
-const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1006l";
 // Alternate screen buffer (like vim/less). The viewer paints into its own
 // isolated full-screen region instead of the normal scrollback, so repaints
 // don't jostle prior shell output and the terminal's own scrollback search
 // can't desync the differential renderer. Restored on exit.
 const ENTER_ALT = "\x1b[?1049h";
 const EXIT_ALT = "\x1b[?1049l";
+// SGR mouse reporting, scoped to the editor only: the vim editor uses plain
+// clicks to position the cursor. Preview/browser never enable this, so the
+// terminal's native click-drag text selection works there.
+const ENABLE_MOUSE = "\x1b[?1000h\x1b[?1006h";
+const DISABLE_MOUSE = "\x1b[?1000l\x1b[?1006l";
 
 /**
  * Drives the interactive UI. Screens (browser, viewer, editor) are swapped as
@@ -41,6 +42,7 @@ class App {
         // input data; catch that path too so quitting always works.
         process.on("SIGINT", () => this.quit());
         // Restore the terminal (mouse + main screen) even on an unexpected exit.
+        // Disabling mouse mode when it was never enabled is a harmless no-op.
         process.on("exit", () => process.stdout.write(DISABLE_MOUSE + EXIT_ALT));
     }
 
@@ -58,7 +60,6 @@ class App {
             return undefined;
         });
         process.stdout.write(ENTER_ALT);
-        process.stdout.write(ENABLE_MOUSE);
         tui.start();
         tui.requestRender(true); // clear the fresh alt-screen and paint from the top
         return tui;
@@ -142,11 +143,15 @@ class App {
                 writeFileSync(path, text);
                 return `written ${basename(path)}`;
             },
-            onQuit: () => rebuild(),
+            onQuit: () => {
+                process.stdout.write(DISABLE_MOUSE);
+                rebuild();
+            },
         });
         tui.clear();
         tui.addChild(editor);
         tui.setFocus(editor);
+        process.stdout.write(ENABLE_MOUSE);
         tui.requestRender();
     }
 }

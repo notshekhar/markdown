@@ -93,10 +93,6 @@ export class Browser implements Component {
             this.list.handleInput?.(data);
             return;
         }
-        if (data.startsWith("\x1b[<")) {
-            this.list.handleInput?.(data);
-            return;
-        }
         if (matchesKey(data, "backspace")) {
             this.filter = this.filter.slice(0, -1);
             this.rebuild();

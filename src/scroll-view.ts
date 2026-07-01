@@ -187,9 +187,6 @@ export class ScrollView implements Component {
             }
             this.onBack?.();
             return;
-        } else if (data.startsWith("\x1b[<")) {
-            this.handleMouse(data);
-            return;
         } else {
             return;
         }
@@ -403,23 +400,6 @@ export class ScrollView implements Component {
             this.hoffset = Math.max(0, m.col - Math.floor(contentWidth / 2));
         }
         this.clampOffset(this.cachedLines.length);
-    }
-
-    private handleMouse(data: string): void {
-        // SGR mouse: ESC [ < button ; col ; row (M|m)
-        const match = /^\x1b\[<(\d+);\d+;\d+[Mm]$/.exec(data);
-        if (!match) {
-            return;
-        }
-        const button = Number(match[1]);
-        if (button === 64) {
-            this.offset -= 3; // wheel up
-        } else if (button === 65) {
-            this.offset += 3; // wheel down
-        } else {
-            return;
-        }
-        this.clampOffset(this.getLines(this.cachedWidth).length);
     }
 
     render(width: number): string[] {
