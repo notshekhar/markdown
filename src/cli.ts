@@ -2,17 +2,20 @@
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import { runBrowser, runViewer } from "./app.ts";
-import { renderMarkdown } from "./render.ts";
+import { renderDocument } from "./render.ts";
 import { prewarmHighlighter } from "./highlight.ts";
+import { docKind } from "./file-list.ts";
 import { getVersion, runUpgrade } from "./commands.ts";
+import { resolveUiModeFromEnv, setActiveUiMode } from "./ui-mode.ts";
 
-const HELP = `markdown — render markdown in your terminal
+const HELP = `markdown — render markdown (and tex) in your terminal
 
 Usage:
-  markdown                 Browse markdown files in the current folder
-  markdown <dir>           Browse markdown files under <dir>
-  markdown <file.md>       Open a file in the interactive viewer
-  markdown <file.md> -p    Print the rendered file and exit (no UI)
+  markdown                 Browse markdown/tex files in the current folder
+  markdown <dir>           Browse under <dir>
+  markdown <file.md>       Open a markdown file in the interactive viewer
+  markdown <file.tex>      Open a LaTeX file as a readable preview (no TeX engine)
+  markdown <file> -p       Print the rendered file and exit (no UI)
 
 Commands:
   update, upgrade          Update to the latest version
@@ -21,13 +24,19 @@ Commands:
 
 Options:
   -p, --print        Print to stdout instead of the interactive viewer
+  --ui <md|noir>     UI mode (default: md). Alias: MD_UI_MODE env
   -v, --version      Print the version
   -h, --help         Show this help
 
 Interactive keys:
   ↑/↓ or j/k         scroll          space/b   page down/up
-  g/G                top/bottom      e         edit in $EDITOR
-  enter              open            esc       back (folders) / quit`;
+  g/G                top/bottom      e         edit
+  u                  cycle UI mode   enter     open
+  esc                back / quit
+
+UI modes (like loop):
+  md     classic cyan header, no canvas wash (default)
+  noir   dark cockpit: OSC 11 wash, ◆ header, ┃ gutters`;
 
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
@@ -56,7 +65,23 @@ async function main(): Promise<void> {
     }
 
     const printMode = args.includes("-p") || args.includes("--print");
-    const positional = args.filter((arg) => !arg.startsWith("-"));
+    // --ui <mode> or --ui=<mode>
+    let uiFlag: string | null = null;
+    for (let i = 0; i < args.length; i++) {
+        if (args[i] === "--ui" && args[i + 1]) {
+            uiFlag = args[i + 1];
+            i++;
+        } else if (args[i]?.startsWith("--ui=")) {
+            uiFlag = args[i].slice("--ui=".length);
+        }
+    }
+    setActiveUiMode(resolveUiModeFromEnv(uiFlag));
+
+    const positional = args.filter(
+        (arg, i) =>
+            !arg.startsWith("-") &&
+            args[i - 1] !== "--ui",
+    );
     const target = positional[0] ? resolve(positional[0]) : process.cwd();
 
     // Piped output (e.g. `md file.md | less`) always prints.
@@ -81,13 +106,18 @@ async function main(): Promise<void> {
     if (forcePrint) {
         const source = readFileSync(target, "utf8");
         const width = process.stdout.columns || 80;
-        // Mermaid image rendering shells out to the mermaid CLI (heavy: pulls a
-        // headless browser), so it's opt-in via MD_MERMAID_IMAGES=1.
+        const kind = docKind(target);
+        // .tex → pure JS markdown conversion (no TeX engine). Markdown still
+        // prewarms Shiki for fenced code blocks inside the document.
+        if (kind !== "tex") {
+            // Mermaid image rendering shells out to the mermaid CLI (heavy: pulls a
+            // headless browser), so it's opt-in via MD_MERMAID_IMAGES=1.
+            // Load grammars for the languages this document uses before rendering,
+            // since highlightCode() runs synchronously inside the renderer.
+            await prewarmHighlighter(source);
+        }
         const images = process.env.MD_MERMAID_IMAGES === "1";
-        // Load grammars for the languages this document uses before rendering,
-        // since highlightCode() runs synchronously inside the renderer.
-        await prewarmHighlighter(source);
-        const lines = renderMarkdown(source, width, { images });
+        const lines = renderDocument(source, width, kind, { images });
         process.stdout.write(`${lines.join("\n")}\n`);
         return;
     }

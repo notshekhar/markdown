@@ -1,33 +1,36 @@
-import chalk from "chalk";
 import type { MarkdownTheme, SelectListTheme } from "@earendil-works/pi-tui";
 import { highlightCode } from "./highlight.ts";
+import { uiStyle } from "./ui-mode.ts";
 
+/** Markdown renderer theme — follows the active UI mode. */
 export function getMarkdownTheme(): MarkdownTheme {
+    const c = uiStyle().colors;
     return {
-        heading: (text) => chalk.cyan.bold(text),
-        link: (text) => chalk.blue(text),
-        linkUrl: (text) => chalk.gray(text),
-        code: (text) => chalk.yellow(text),
-        codeBlock: (text) => chalk.gray(text),
-        codeBlockBorder: (text) => chalk.dim.gray(text),
-        quote: (text) => chalk.italic.gray(text),
-        quoteBorder: (text) => chalk.magenta(text),
-        hr: (text) => chalk.dim.gray(text),
-        listBullet: (text) => chalk.magenta(text),
-        bold: (text) => chalk.bold(text),
-        italic: (text) => chalk.italic(text),
-        underline: (text) => chalk.underline(text),
-        strikethrough: (text) => chalk.strikethrough(text),
+        heading: c.heading,
+        link: c.link,
+        linkUrl: c.linkUrl,
+        code: c.code,
+        codeBlock: c.codeBlock,
+        codeBlockBorder: c.codeBlockBorder,
+        quote: c.quote,
+        quoteBorder: c.quoteBorder,
+        hr: c.hr,
+        listBullet: c.listBullet,
+        bold: c.bold,
+        italic: c.italic,
+        underline: c.underline,
+        strikethrough: c.strikethrough,
         highlightCode: (code, lang) => highlightCode(code, lang),
     };
 }
 
 export function getSelectListTheme(): SelectListTheme {
+    const c = uiStyle().colors;
     return {
-        selectedPrefix: (text) => chalk.cyan(text),
-        selectedText: (text) => chalk.cyan(text),
-        description: (text) => chalk.gray(text),
-        scrollInfo: (text) => chalk.gray(text),
-        noMatch: (text) => chalk.gray(text),
+        selectedPrefix: c.selected,
+        selectedText: c.selected,
+        description: c.muted,
+        scrollInfo: c.muted,
+        noMatch: c.muted,
     };
 }

@@ -1,17 +1,42 @@
 import { readdirSync } from "node:fs";
-import { join, relative } from "node:path";
+import { extname, join, relative } from "node:path";
 
+/** Markdown sources. */
 const MARKDOWN_EXT = /\.(md|markdown|mdx)$/i;
+/** LaTeX sources (resumes, papers, etc.). */
+const TEX_EXT = /\.(tex|latex|ltx)$/i;
+/** Any file the browser / viewer can open. */
+const VIEWABLE_EXT = /\.(md|markdown|mdx|tex|latex|ltx)$/i;
+
 const SKIP_DIRS = new Set(["node_modules", ".git", "dist", "build", ".next", ".cache", "vendor"]);
 
+export type DocKind = "markdown" | "tex";
+
+export function isMarkdownPath(path: string): boolean {
+    return MARKDOWN_EXT.test(path);
+}
+
+export function isTexPath(path: string): boolean {
+    return TEX_EXT.test(path);
+}
+
+export function isViewablePath(path: string): boolean {
+    return VIEWABLE_EXT.test(path);
+}
+
+/** Classify a path for the renderer. Unknown extensions fall back to markdown. */
+export function docKind(path: string): DocKind {
+    return isTexPath(path) ? "tex" : "markdown";
+}
+
 export interface DirListing {
-    /** Absolute paths of subdirectories that contain markdown somewhere below. */
+    /** Absolute paths of subdirectories that contain a viewable file somewhere below. */
     dirs: string[];
-    /** Absolute paths of markdown files directly in this directory. */
+    /** Absolute paths of viewable files directly in this directory. */
     files: string[];
 }
 
-/** List one directory: markdown-bearing subfolders and markdown files. */
+/** List one directory: viewable-bearing subfolders and viewable files. */
 export function listDirectory(dir: string): DirListing {
     let entries;
     try {
@@ -27,10 +52,10 @@ export function listDirectory(dir: string): DirListing {
         }
         const full = join(dir, entry.name);
         if (entry.isDirectory()) {
-            if (!SKIP_DIRS.has(entry.name) && hasMarkdown(full, 0)) {
+            if (!SKIP_DIRS.has(entry.name) && hasViewable(full, 0)) {
                 dirs.push(full);
             }
-        } else if (MARKDOWN_EXT.test(entry.name)) {
+        } else if (VIEWABLE_EXT.test(entry.name)) {
             files.push(full);
         }
     }
@@ -39,8 +64,8 @@ export function listDirectory(dir: string): DirListing {
     return { dirs, files };
 }
 
-/** True if a directory contains any markdown file within the depth limit. */
-function hasMarkdown(dir: string, depth: number): boolean {
+/** True if a directory contains any viewable file within the depth limit. */
+function hasViewable(dir: string, depth: number): boolean {
     if (depth > 12) {
         return false;
     }
@@ -55,22 +80,27 @@ function hasMarkdown(dir: string, depth: number): boolean {
             continue;
         }
         if (entry.isDirectory()) {
-            if (!SKIP_DIRS.has(entry.name) && hasMarkdown(join(dir, entry.name), depth + 1)) {
+            if (!SKIP_DIRS.has(entry.name) && hasViewable(join(dir, entry.name), depth + 1)) {
                 return true;
             }
-        } else if (MARKDOWN_EXT.test(entry.name)) {
+        } else if (VIEWABLE_EXT.test(entry.name)) {
             return true;
         }
     }
     return false;
 }
 
-/** Recursively collect markdown files under root, returned as relative paths. */
-export function findMarkdownFiles(root: string): string[] {
+/** Recursively collect viewable files under root, returned as relative paths. */
+export function findViewableFiles(root: string): string[] {
     const found: string[] = [];
     walk(root, root, found, 0);
     found.sort((a, b) => a.localeCompare(b));
     return found;
+}
+
+/** @deprecated Prefer findViewableFiles — kept as a thin alias for older call sites. */
+export function findMarkdownFiles(root: string): string[] {
+    return findViewableFiles(root);
 }
 
 function walk(dir: string, root: string, found: string[], depth: number): void {
@@ -95,8 +125,14 @@ function walk(dir: string, root: string, found: string[], depth: number): void {
                 continue;
             }
             walk(full, root, found, depth + 1);
-        } else if (MARKDOWN_EXT.test(entry.name)) {
+        } else if (VIEWABLE_EXT.test(entry.name)) {
             found.push(relative(root, full) || entry.name);
         }
     }
+}
+
+/** Unused but handy for labels (e.g. footer). */
+export function extensionLabel(path: string): string {
+    const ext = extname(path).replace(/^\./, "").toLowerCase();
+    return ext || "file";
 }

@@ -3,6 +3,8 @@ import { getMarkdownTheme } from "./theme.ts";
 import { renderMathInMarkdown } from "./math.ts";
 import { stripInternalAnchorLinks } from "./links.ts";
 import { renderMermaid } from "./mermaid.ts";
+import { texToMarkdown } from "./tex.ts";
+import type { DocKind } from "./file-list.ts";
 
 export interface RenderOptions {
     /** Print mode renders mermaid as inline images when the terminal supports it. */
@@ -38,6 +40,29 @@ export function renderMarkdown(source: string, width: number, options: RenderOpt
     }
 
     return lines;
+}
+
+/**
+ * Render a LaTeX source file as a readable terminal preview.
+ *
+ * Pure JS: converts common LaTeX/resume macros → markdown, then reuses the
+ * markdown renderer. No TeX engine, no shell-outs, no extra packages.
+ */
+export function renderTex(source: string, width: number, options: RenderOptions = {}): string[] {
+    return renderMarkdown(texToMarkdown(source), width, options);
+}
+
+/** Dispatch to the right renderer by document kind. */
+export function renderDocument(
+    source: string,
+    width: number,
+    kind: DocKind,
+    options: RenderOptions = {},
+): string[] {
+    if (kind === "tex") {
+        return renderTex(source, width, options);
+    }
+    return renderMarkdown(source, width, options);
 }
 
 /** Split a document into ordered markdown and mermaid chunks. */

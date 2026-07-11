@@ -1,6 +1,8 @@
 import chalk from "chalk";
 import { type Component, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { sliceByColumn } from "@earendil-works/pi-tui/dist/utils.js";
+import { activeUiMode, cycleUiMode, uiStyle } from "./ui-mode.ts";
+import { applyCanvasWash } from "./canvas-wash.ts";
 
 type LineProvider = (width: number) => string[];
 
@@ -41,10 +43,6 @@ export class ScrollView implements Component {
     private cachedLines: string[] = [];
     /** ANSI-stripped copy of cachedLines, for searching (built lazily). */
     private plainLines: string[] = [];
-    // Left/right gutter inside the preview. Some terminals add their own
-    // padding, but many (and VS Code's) sit flush against the edge.
-    private margin = 2;
-
     // ── search state ─────────────────────────────────────────────────────────
     private searching = false; // typing a query in the footer
     private query = "";
@@ -67,6 +65,8 @@ export class ScrollView implements Component {
 
     public onBack?: () => void;
     public onEdit?: () => void;
+    /** Called after a UI mode cycle so the host can re-paint children. */
+    public onUiModeChange?: () => void;
     /** Source text + writer for find-and-replace; absent → replace is disabled. */
     public getSource?: () => string;
     public onReplaceSource?: (text: string) => void;
@@ -124,8 +124,18 @@ export class ScrollView implements Component {
         this.hoffset = Math.min(Math.max(0, this.hoffset), this.maxHoffset());
     }
 
+    /** Body content width for a full terminal row width (mode-aware gutters). */
+    private contentWidthFor(termWidth: number): number {
+        const style = uiStyle();
+        const leftPad = style.body.margin;
+        const gutterCols = style.body.gutter ? visibleWidth(style.body.gutter) + 1 : 0;
+        return Math.max(1, termWidth - leftPad - gutterCols - leftPad);
+    }
+
     handleInput(data: string): void {
-        const width = this.cachedWidth < 0 ? Math.max(1, (process.stdout.columns || 80) - this.margin * 2) : this.cachedWidth;
+        const termW = process.stdout.columns || 80;
+        const width =
+            this.cachedWidth < 0 ? this.contentWidthFor(termW) : this.cachedWidth;
         const lines = this.getLines(width);
         const page = Math.max(1, this.viewportHeight() - 1);
         this.message = ""; // any keypress dismisses the transient status line
@@ -171,6 +181,14 @@ export class ScrollView implements Component {
             return;
         } else if (matchesKey(data, "e")) {
             this.onEdit?.();
+            return;
+        } else if (matchesKey(data, "u")) {
+            // Cycle UI mode (md ↔ noir), same idea as loop's /ui.
+            cycleUiMode();
+            applyCanvasWash();
+            this.invalidate(); // re-render body with the new markdown theme
+            this.message = `ui: ${activeUiMode().name}`;
+            this.onUiModeChange?.();
             return;
         } else if (matchesKey(data, "backspace")) {
             // Backspace edits the query in search mode and otherwise dismisses an
@@ -395,17 +413,27 @@ export class ScrollView implements Component {
         if (m.line < this.offset || m.line >= this.offset + height) {
             this.offset = Math.max(0, m.line - Math.floor(height / 2));
         }
-        const contentWidth = Math.max(1, width - this.margin * 2);
-        if (m.col < this.hoffset || m.col + m.len > this.hoffset + contentWidth) {
-            this.hoffset = Math.max(0, m.col - Math.floor(contentWidth / 2));
+        // `width` is content width when called from recomputeMatches / step.
+        const cw = Math.max(1, this.cachedWidth > 0 ? this.cachedWidth : width);
+        if (m.col < this.hoffset || m.col + m.len > this.hoffset + cw) {
+            this.hoffset = Math.max(0, m.col - Math.floor(cw / 2));
         }
         this.clampOffset(this.cachedLines.length);
     }
 
     render(width: number): string[] {
-        // Content is rendered into the gutter-reduced width, then indented.
-        const contentWidth = Math.max(1, width - this.margin * 2);
-        const gutter = " ".repeat(this.margin);
+        const style = uiStyle();
+        const c = style.colors;
+        // Content width accounts for left margin + optional accent gutter.
+        const gutterGlyph = style.body.gutter
+            ? c.gutter(style.body.gutter) + " "
+            : "";
+        const leftPad = style.body.margin;
+        const leftCols =
+            leftPad +
+            (style.body.gutter ? visibleWidth(style.body.gutter) + 1 : 0);
+        const contentWidth = Math.max(1, width - leftCols - leftPad);
+        const side = " ".repeat(leftPad);
         const lines = this.getLines(contentWidth);
         if (this.query && this.matchWidth !== contentWidth) {
             this.recomputeMatches(contentWidth);
@@ -427,42 +455,55 @@ export class ScrollView implements Component {
             const styled = byLine.has(lineIdx)
                 ? highlightLine(raw, this.plainLines[lineIdx] ?? "", byLine.get(lineIdx)!, current)
                 : raw;
-            body.push(`${gutter}${sliceByColumn(styled, this.hoffset, contentWidth)}`);
+            body.push(
+                `${side}${gutterGlyph}${sliceByColumn(styled, this.hoffset, contentWidth)}`,
+            );
         }
 
         const total = Math.max(1, lines.length);
         const shown = Math.min(this.offset + height, total);
         const percent = Math.round((shown / total) * 100);
 
-        const header = padLine(chalk.bgCyan.black.bold(` ${this.title} `), width);
-        const rule = chalk.dim.gray("─".repeat(width));
-        const footer = padLine(`${gutter}${this.footer(percent)}`, width);
+        const prefix = style.header.prefix;
+        const titleText = ` ${prefix}${this.title} `;
+        const header =
+            style.header.style === "bar"
+                ? padLine(c.headerBg(titleText), width)
+                : padLine(c.headerBg(titleText), width);
+        const rule = style.chrome.rule ? c.rule("─".repeat(width)) : "";
+        const footer = padLine(`${side}${this.footer(percent)}`, width);
 
-        return [header, rule, ...body, footer];
+        return rule ? [header, rule, ...body, footer] : [header, ...body, footer];
     }
 
     private footer(percent: number): string {
-        const mode = chalk.magenta(`${this.searchMode}`);
-        const find = `${chalk.cyan("/")}${mode} `;
+        const c = uiStyle().colors;
+        const mode = c.accent(`${this.searchMode}`);
+        const find = `${c.accent("/")}${mode} `;
         if (this.replacing) {
             const findField = `${find}${this.query}`;
-            const replField = `${chalk.cyan("→")} ${caret(this.replacement, this.replacementCursor)}`;
-            return `${findField}  ${replField}  ${chalk.cyan(this.matchCount())}  ${chalk.gray("enter replace all · tab find · esc cancel")}`;
+            const replField = `${c.accent("→")} ${caret(this.replacement, this.replacementCursor)}`;
+            return `${findField}  ${replField}  ${c.accent(this.matchCount())}  ${c.muted("enter replace all · tab find · esc cancel")}`;
         }
         if (this.searching) {
-            const count = this.query ? chalk.cyan(`  ${this.matchCount()}`) : "";
-            return `${find}${caret(this.query, this.queryCursor)}${count}  ${chalk.gray("tab mode · enter find · esc cancel")}`;
+            const count = this.query ? c.accent(`  ${this.matchCount()}`) : "";
+            return `${find}${caret(this.query, this.queryCursor)}${count}  ${c.muted("tab mode · enter find · esc cancel")}`;
         }
         if (this.message) {
-            return chalk.cyan(this.message);
+            return c.accent(this.message);
         }
         if (this.matches.length > 0 || this.query) {
             const repl = this.onReplaceSource ? " · R replace" : "";
-            const hint = chalk.gray(`n/N next/prev${repl} · esc clear`);
-            return `${find}${this.query}  ${chalk.cyan(this.matchCount())}  ${hint}  ${chalk.cyan(`${percent}%`)}`;
+            const hint = c.muted(`n/N next/prev${repl} · esc clear`);
+            return `${find}${this.query}  ${c.accent(this.matchCount())}  ${hint}  ${c.accent(`${percent}%`)}`;
         }
-        const hint = chalk.gray("↑/↓ scroll · ←/→ pan · g/G top/bottom · / find · e edit · esc back");
-        return `${hint}  ${chalk.cyan(`${percent}%`)}`;
+        const badge = uiStyle().chrome.modeBadge
+            ? c.muted(` · ui:${activeUiMode().id}`)
+            : "";
+        const hint = c.muted(
+            `↑/↓ scroll · ←/→ pan · g/G top/bottom · / find · u ui · e edit · esc back${badge}`,
+        );
+        return `${hint}  ${c.accent(`${percent}%`)}`;
     }
 
     private matchCount(): string {
@@ -489,7 +530,8 @@ function highlightLine(styled: string, plain: string, ranges: Match[], current: 
         }
         const text = plain.slice(r.col, r.col + r.len);
         const isCurrent = current && current.line === r.line && current.col === r.col;
-        out += isCurrent ? chalk.black.bgYellow(text) : chalk.black.bgCyan(text);
+        const c = uiStyle().colors;
+        out += isCurrent ? c.searchCurrent(text) : c.searchHit(text);
         cursor = r.col + r.len;
     }
     out += sliceByColumn(styled, cursor, Number.MAX_SAFE_INTEGER);
@@ -497,8 +539,11 @@ function highlightLine(styled: string, plain: string, ranges: Match[], current: 
 }
 
 function padLine(text: string, width: number): string {
-    const pad = Math.max(0, width - visibleWidth(text));
-    return text + " ".repeat(pad);
+    // Truncate first — footers can grow past the terminal when we append keys.
+    const clipped =
+        visibleWidth(text) > width ? sliceByColumn(text, 0, width) : text;
+    const pad = Math.max(0, width - visibleWidth(clipped));
+    return clipped + " ".repeat(pad);
 }
 
 /** Render a one-line input field with a visible caret at `cursor`. */

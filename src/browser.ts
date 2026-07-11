@@ -1,8 +1,9 @@
 import { basename, dirname, relative, resolve } from "node:path";
-import chalk from "chalk";
 import { type Component, SelectList, fuzzyFilter, matchesKey, visibleWidth } from "@earendil-works/pi-tui";
 import { getSelectListTheme } from "./theme.ts";
 import { listDirectory } from "./file-list.ts";
+import { activeUiMode, cycleUiMode, uiStyle } from "./ui-mode.ts";
+import { applyCanvasWash } from "./canvas-wash.ts";
 
 interface Entry {
     value: string; // absolute path
@@ -11,9 +12,10 @@ interface Entry {
 }
 
 /**
- * A directory browser. Folders and markdown files are listed for the current
- * directory; entering a folder descends into it, and `esc` walks back up to the
- * parent. At the root it does nothing — quitting is Ctrl+C only.
+ * A directory browser. Folders and viewable files (markdown, tex) are listed
+ * for the current directory; entering a folder descends into it, and `esc`
+ * walks back up to the parent. At the root it does nothing — quitting is
+ * Ctrl+C only.
  */
 export class Browser implements Component {
     private root: string;
@@ -23,6 +25,8 @@ export class Browser implements Component {
     private dirSet = new Set<string>();
 
     public onOpenFile?: (absPath: string) => void;
+    /** Host re-render after UI mode cycle. */
+    public onUiModeChange?: () => void;
 
     constructor(root: string) {
         this.root = resolve(root);
@@ -49,6 +53,7 @@ export class Browser implements Component {
         if (this.filter) {
             entries = fuzzyFilter(entries, this.filter, (entry) => entry.label);
         }
+        // Theme follows the active UI mode (rebuilt after `u`).
         const list = new SelectList(
             entries.map((entry) => ({ value: entry.value, label: entry.label })),
             this.maxVisible(),
@@ -89,6 +94,13 @@ export class Browser implements Component {
             this.goUp();
             return;
         }
+        if (matchesKey(data, "u")) {
+            cycleUiMode();
+            applyCanvasWash();
+            this.rebuild();
+            this.onUiModeChange?.();
+            return;
+        }
         if (matchesKey(data, "up") || matchesKey(data, "down") || matchesKey(data, "enter")) {
             this.list.handleInput?.(data);
             return;
@@ -106,16 +118,20 @@ export class Browser implements Component {
     }
 
     render(width: number): string[] {
+        const c = uiStyle().colors;
         const here = relative(this.root, this.currentDir);
         const crumb = here ? `${basename(this.root)}/${here}` : basename(this.root);
-        const heading = chalk.cyan.bold(`  ${crumb}`);
+        const modeTag = uiStyle().chrome.modeBadge
+            ? c.muted(`  [${activeUiMode().id}]`)
+            : "";
+        const heading = c.browserHeading(`  ${crumb}`) + modeTag;
 
-        const queryLabel = chalk.gray("  filter: ");
-        const query = this.filter ? chalk.cyan(this.filter) : chalk.gray("(type to search)");
+        const queryLabel = c.muted("  filter: ");
+        const query = this.filter ? c.accent(this.filter) : c.muted("(type to search)");
 
         const atRoot = resolve(this.currentDir) === this.root;
         const back = atRoot ? "" : " · esc up";
-        const hint = chalk.gray(`  ↑/↓ move · enter open${back} · ctrl+c quit`);
+        const hint = c.muted(`  ↑/↓ move · enter open · u ui${back} · ctrl+c quit`);
 
         const lines = [padLine(heading, width), padLine(`${queryLabel}${query}`, width), ""];
         lines.push(...this.list.render(width));

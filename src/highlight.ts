@@ -141,6 +141,20 @@ export async function prewarmHighlighter(source: string): Promise<void> {
     }
 }
 
+/**
+ * Preload a single Shiki language (e.g. `latex` for whole-file .tex previews).
+ * Safe to call repeatedly; failures are ignored.
+ */
+export async function prewarmLanguage(lang: string): Promise<void> {
+    const resolved = normalize(lang);
+    if (!resolved) return;
+    try {
+        await ensureLoaded([resolved]);
+    } catch {
+        // Highlighting is a nicety; never let it break rendering.
+    }
+}
+
 /** Render a code block to styled terminal lines (one string per source line). */
 export function highlightCode(code: string, lang?: string): string[] {
     // An explicit (even if unsupported) language is respected as-is; only truly
