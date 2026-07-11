@@ -42,12 +42,18 @@ class App {
         // Some terminals deliver Ctrl+C as a SIGINT signal rather than as \x03
         // input data; catch that path too so quitting always works.
         process.on("SIGINT", () => this.quit());
-        // Restore the terminal (mouse + main screen + canvas wash) even on an
-        // unexpected exit. Disabling mouse mode when it was never enabled is a
-        // harmless no-op.
+        process.on("SIGTERM", () => this.quit());
+        // Last-resort restore if stop()/quit never ran (SIGKILL-adjacent
+        // crashes, uncaught exceptions). Must use writeSync (inside
+        // resetCanvasWash) — async stdout.write is dropped on exit.
         process.on("exit", () => {
-            resetCanvasWash();
-            process.stdout.write(DISABLE_MOUSE + EXIT_ALT);
+            try {
+                process.stdout.write(DISABLE_MOUSE + EXIT_ALT);
+            } catch {
+                /* ignore */
+            }
+            // force: always emit OSC 111 even if washApplied was cleared mid-teardown
+            resetCanvasWash(true);
         });
     }
 
@@ -65,18 +71,32 @@ class App {
             return undefined;
         });
         process.stdout.write(ENTER_ALT);
-        applyCanvasWash();
         tui.start();
+        // After start (matches loop): apply wash once the terminal is live.
+        // pi-tui does not cleanse OSC 111 on start, but applying after start
+        // still avoids racing raw-mode / bracketed-paste setup.
+        applyCanvasWash();
         tui.requestRender(true); // clear the fresh alt-screen and paint from the top
         return tui;
     }
 
     private teardownTui(): void {
-        process.stdout.write(DISABLE_MOUSE);
+        // Order matters for restoring a normal shell, same spirit as loop:
+        // 1) leave mouse / raw TUI, 2) leave alt-screen, 3) undo OSC 11 wash
+        // with a sync write so the main buffer is no longer dark.
+        try {
+            process.stdout.write(DISABLE_MOUSE);
+        } catch {
+            /* ignore */
+        }
         this.tui?.stop();
-        resetCanvasWash();
-        process.stdout.write(EXIT_ALT);
         this.tui = null;
+        try {
+            process.stdout.write(EXIT_ALT);
+        } catch {
+            /* ignore */
+        }
+        resetCanvasWash(true);
     }
 
     private quit(): void {
