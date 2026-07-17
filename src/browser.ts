@@ -12,6 +12,44 @@ interface Entry {
 }
 
 /**
+ * Drops wheel-generated arrow bursts right after a screen transition.
+ *
+ * Mouse-wheel scrolling in the viewer works via the terminal's alternate
+ * scroll mode, which encodes wheel ticks as plain up/down arrow sequences.
+ * With macOS inertial scrolling those keep arriving for a second or more
+ * after the flick — so escaping back to the list mid-scroll used to whip the
+ * selection around (and wrap it top↔bottom) until the momentum died out.
+ *
+ * While armed, arrow events that arrive in a rapid burst are dropped; the
+ * first arrow after a quiet gap is a real keystroke, which disarms the guard
+ * and is handled normally.
+ */
+export class WheelBurstGuard {
+    private armed = false;
+    private last = 0;
+
+    constructor(private quietMs = 250) {}
+
+    arm(now = Date.now()): void {
+        this.armed = true;
+        this.last = now;
+    }
+
+    /** True when this arrow event is part of the armed burst and must be dropped. */
+    shouldDrop(now = Date.now()): boolean {
+        if (!this.armed) {
+            return false;
+        }
+        const rapid = now - this.last < this.quietMs;
+        this.last = now;
+        if (!rapid) {
+            this.armed = false;
+        }
+        return rapid;
+    }
+}
+
+/**
  * A directory browser. Folders and viewable files (markdown, tex) are listed
  * for the current directory; entering a folder descends into it, and `esc`
  * walks back up to the parent. At the root it does nothing — quitting is
@@ -23,6 +61,7 @@ export class Browser implements Component {
     private filter = "";
     private list: SelectList;
     private dirSet = new Set<string>();
+    private wheelGuard = new WheelBurstGuard();
 
     public onOpenFile?: (absPath: string) => void;
     /** Host re-render after UI mode cycle. */
@@ -65,11 +104,17 @@ export class Browser implements Component {
         return list;
     }
 
+    /** Called by the host whenever the browser becomes the visible screen. */
+    noteShown(): void {
+        this.wheelGuard.arm();
+    }
+
     private select(value: string): void {
         if (this.dirSet.has(value)) {
             this.currentDir = value;
             this.filter = "";
             this.rebuild();
+            this.wheelGuard.arm();
         } else {
             this.onOpenFile?.(value);
         }
@@ -83,6 +128,7 @@ export class Browser implements Component {
         this.currentDir = dirname(this.currentDir);
         this.filter = "";
         this.rebuild();
+        this.wheelGuard.arm();
     }
 
     invalidate(): void {
@@ -101,7 +147,16 @@ export class Browser implements Component {
             this.onUiModeChange?.();
             return;
         }
-        if (matchesKey(data, "up") || matchesKey(data, "down") || matchesKey(data, "enter")) {
+        if (matchesKey(data, "up") || matchesKey(data, "down")) {
+            // Leftover wheel momentum from the screen we just left arrives as
+            // arrow bursts; drop those instead of spinning the selection.
+            if (this.wheelGuard.shouldDrop()) {
+                return;
+            }
+            this.list.handleInput?.(data);
+            return;
+        }
+        if (matchesKey(data, "enter")) {
             this.list.handleInput?.(data);
             return;
         }

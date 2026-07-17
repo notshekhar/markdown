@@ -115,6 +115,9 @@ class App {
             this.browser.onOpenFile = (absPath) => void this.showViewer(absPath);
             this.browser.onUiModeChange = () => this.tui?.requestRender(true);
         }
+        // Swallow the wheel-momentum arrow tail from the screen we just left
+        // (esc mid-scroll in the viewer used to whip the list selection).
+        this.browser.noteShown();
         tui.clear();
         tui.addChild(this.browser);
         tui.setFocus(this.browser);
