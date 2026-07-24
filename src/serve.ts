@@ -1119,6 +1119,54 @@ textarea.ed-input {
   background: var(--code-bg);
 }
 .table-scroll { overflow: auto; max-height: 70vh; }
+/* ── json tree viewer ────────────────────────────────────── */
+.json-tree {
+  padding: 1rem 1.15rem;
+  font-family: var(--font-mono);
+  font-size: .84rem;
+  line-height: 1.65;
+  overflow: auto;
+  max-height: 70vh;
+}
+.json-node > summary {
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.json-node > summary::-webkit-details-marker { display: none; }
+.json-node > summary::before {
+  content: "";
+  display: inline-block;
+  width: 0; height: 0;
+  margin-right: .35rem;
+  border-left: 5px solid var(--fg-faint);
+  border-top: 4px solid transparent;
+  border-bottom: 4px solid transparent;
+  transition: transform .12s;
+}
+.json-node[open] > summary::before { transform: rotate(90deg); }
+.json-node:not([open]) > summary .json-kids { display: none; }
+.json-count {
+  margin: 0 .3rem;
+  padding: 0 .35rem;
+  font-size: .68rem;
+  color: var(--fg-faint);
+  background: var(--bg-hover);
+}
+.json-node[open] > summary .json-count { display: none; }
+.json-brk { color: var(--fg-faint); }
+.json-kids { margin-left: .55rem; padding-left: .85rem; border-left: 1px solid var(--border-soft); }
+.json-key { color: var(--accent); margin-right: .45rem; }
+.json-key::after { content: ":"; color: var(--fg-faint); }
+.json-string { color: #16a34a; }
+.json-number { color: #2563eb; }
+.json-boolean { color: #d97706; }
+.json-null { color: #dc2626; font-style: italic; }
+.json-empty { color: var(--fg-faint); }
+html[data-theme="dark"] .json-string { color: #4ade80; }
+html[data-theme="dark"] .json-number { color: #60a5fa; }
+html[data-theme="dark"] .json-boolean { color: #fbbf24; }
+html[data-theme="dark"] .json-null { color: #f87171; }
 .article pre {
   margin: 0;
   padding: 1rem 1.15rem;
@@ -1292,9 +1340,10 @@ html[data-theme="dark"] .article .shiki span { color: var(--shiki-dark) !importa
   box-shadow: var(--shadow-lg);
   overflow: hidden;
 }
-.full-overlay .code-wrap pre, .full-overlay .table-wrap .table-scroll {
+.full-overlay .code-wrap pre, .full-overlay .table-wrap .table-scroll, .full-overlay .code-wrap .json-tree {
   flex: 1;
   overflow: auto;
+  max-height: none;
 }
 .full-overlay .code-wrap pre { margin: 0; }
 
@@ -2259,6 +2308,7 @@ async function highlightCode(root) {
   const wraps = Array.from(scope.querySelectorAll(".code-wrap"));
   for (const wrap of wraps) {
     if (run !== highlightRun) return; // a newer render superseded us
+    if (wrap.__jsonTree) continue; // json blocks show the interactive tree instead
     const pre = wrap.querySelector("pre.raw-code");
     if (!pre) continue;
     const codeEl = pre.querySelector("code");
@@ -2526,7 +2576,64 @@ function bindDiagramTools(card, ctl) {
 }
 function fitCheckIcon() { return svgIcon('<path d="M20 6L9 17l-5-5"/>'); }
 
-function enrich(el) { renderMathIn(el); runMermaid(el); bindCopyButtons(el); highlightCode(el); }
+// ── json: interactive tree, expanded by default ───────────
+// JSON code blocks render as a collapsible <details> tree. The raw <pre> stays
+// in the DOM (hidden) so the copy button and shiki keep working.
+function renderJsonViews(root) {
+  (root || content).querySelectorAll('.code-wrap[data-lang="json"]').forEach((wrap) => {
+    if (wrap.__jsonTree) return;
+    const code = wrap.querySelector("pre code");
+    const raw = code ? code.textContent : "";
+    let data;
+    try { data = JSON.parse(raw); } catch { return; } // not valid json — leave as code
+    wrap.__jsonTree = true;
+    const pre = wrap.querySelector("pre");
+    if (pre) pre.style.display = "none";
+    const tree = document.createElement("div");
+    tree.className = "json-tree";
+    tree.appendChild(jsonNode(data));
+    if (pre) pre.after(tree); else wrap.appendChild(tree);
+  });
+}
+function jsonLeaf(text, type) {
+  const s = document.createElement("span");
+  s.className = "json-val json-" + type;
+  s.textContent = text;
+  return s;
+}
+function jsonRow(key, v) {
+  const row = document.createElement("div");
+  row.className = "json-row";
+  const k = document.createElement("span");
+  k.className = "json-key";
+  k.textContent = key;
+  row.appendChild(k);
+  row.appendChild(jsonNode(v));
+  return row;
+}
+function jsonNode(v) {
+  if (v === null) return jsonLeaf("null", "null");
+  const t = Array.isArray(v) ? "array" : typeof v;
+  if (t !== "object" && t !== "array") {
+    return jsonLeaf(t === "string" ? JSON.stringify(v) : String(v), t);
+  }
+  const keys = t === "array" ? v.map((_, i) => String(i)) : Object.keys(v);
+  if (!keys.length) return jsonLeaf(t === "array" ? "[]" : "{}", "empty");
+  const d = document.createElement("details");
+  d.className = "json-node";
+  d.open = true;
+  const s = document.createElement("summary");
+  const open = t === "array" ? "[" : "{", close = t === "array" ? "]" : "}";
+  s.innerHTML = '<span class="json-brk">'+open+'</span><span class="json-count">'+keys.length+'</span><span class="json-brk json-close">'+close+'</span>';
+  d.appendChild(s);
+  const kids = document.createElement("div");
+  kids.className = "json-kids";
+  keys.forEach((k) => kids.appendChild(jsonRow(k, v[k])));
+  d.appendChild(kids);
+  return d;
+}
+
+function enrich(el) { renderMathIn(el); runMermaid(el); bindCopyButtons(el); renderJsonViews(el); highlightCode(el); }
 
 // ── file-op UI: refs, icons, toast, modal, context menu ─────
 const ctxMenu = $("ctx-menu");

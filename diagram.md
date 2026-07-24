@@ -301,13 +301,17 @@ echo "Installed to $BIN_DIR/markdown"
 echo "Run: markdown --version"
 ```
 
-## JSON
+## JSON (interactive tree)
 
 ```json
 {
   "name": "markdown",
-  "version": "1.1.2",
+  "version": "1.1.4",
   "description": "Render markdown in terminal or browser",
+  "private": false,
+  "downloads": 1234567,
+  "rating": 4.9,
+  "deprecated": null,
   "bin": {
     "markdown": "./src/cli.ts",
     "md": "./src/cli.ts"
@@ -318,7 +322,22 @@ echo "Run: markdown --version"
     "highlight.js": "^11.11.1",
     "marked": "^14.1.4",
     "shiki": "^4.2.0"
-  }
+  },
+  "releases": [
+    { "tag": "v1.1.1", "notes": "mermaid pan/zoom", "assets": ["darwin-arm64", "linux-x64"] },
+    { "tag": "v1.1.2", "notes": "zoom pixelation fix", "assets": ["darwin-arm64", "linux-x64"] },
+    { "tag": "v1.1.3", "notes": "fullscreen code + tables", "assets": [] }
+  ],
+  "maintainers": [
+    {
+      "name": "notshekhar",
+      "active": true,
+      "repos": ["markdown", "oboe", "pi"],
+      "links": { "github": "https://github.com/notshekhar", "sponsor": null }
+    }
+  ],
+  "empty": {},
+  "emptyList": []
 }
 ```
 
