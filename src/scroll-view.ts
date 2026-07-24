@@ -65,6 +65,16 @@ export class ScrollView implements Component {
 
     public onBack?: () => void;
     public onEdit?: () => void;
+    /**
+     * Line to reopen at, from the state db. Applied on the first render, once
+     * the document has been laid out and the line count is known — clamped, so
+     * a file that shrank since last time still opens somewhere sensible.
+     */
+    public restoreLine = 0;
+    /** Top visible line, reported whenever it changes, for persistence. */
+    public onScrollChange?: (line: number) => void;
+    private pendingRestore = true;
+    private reportedOffset = -1;
     /** Called after a UI mode cycle so the host can re-paint children. */
     public onUiModeChange?: () => void;
     /** Source text + writer for find-and-replace; absent → replace is disabled. */
@@ -81,6 +91,8 @@ export class ScrollView implements Component {
         this.provider = provider;
         this.offset = 0;
         this.hoffset = 0;
+        this.pendingRestore = true;
+        this.reportedOffset = -1;
         this.cachedWidth = -1;
         this.cachedLines = [];
         this.plainLines = [];
@@ -439,7 +451,19 @@ export class ScrollView implements Component {
             this.recomputeMatches(contentWidth);
         }
         const height = this.viewportHeight();
+        if (this.pendingRestore) {
+            this.pendingRestore = false;
+            if (this.restoreLine > 0) {
+                this.offset = Math.min(this.restoreLine, this.maxOffset(lines.length));
+            }
+        }
         this.clampOffset(lines.length);
+        // Reported from render (not the key handler) so search jumps, resizes
+        // and clamping all report the line the reader actually ends up on.
+        if (this.offset !== this.reportedOffset) {
+            this.reportedOffset = this.offset;
+            this.onScrollChange?.(this.offset);
+        }
 
         // Group matches by line so each visible row is highlighted in one pass.
         const byLine = new Map<number, Match[]>();

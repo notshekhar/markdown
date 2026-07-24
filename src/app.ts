@@ -8,6 +8,9 @@ import { prewarmHighlighter } from "./highlight.ts";
 import { docKind, findViewableFiles } from "./file-list.ts";
 import { VimEditor, type VimOptions } from "./editor/vim-editor.ts";
 import { applyCanvasWash, resetCanvasWash } from "./canvas-wash.ts";
+import { loadPosition, loadTuiPrefs, savePosition, saveEditorOptions, saveUiMode } from "./tui-state.ts";
+import { activeUiMode } from "./ui-mode.ts";
+import { probeTerminalWidths, type WidthProbe } from "./width-probe.ts";
 
 // Alternate screen buffer (like vim/less). The viewer paints into its own
 // isolated full-screen region instead of the normal scrollback, so repaints
@@ -33,12 +36,18 @@ class App {
     // One browser instance, kept alive across viewer trips so it remembers the
     // folder you were in.
     private browser: Browser | null = null;
-    // Editor view options (number/relativenumber). Session-only — markdown has
-    // no settings store of its own; toggles via :set persist until exit.
-    private editorOptions: VimOptions = { number: true, relativenumber: true };
+    // The viewer currently on screen, so a width recalibration can drop its
+    // cached layout.
+    private viewer: ScrollView | null = null;
+    private widthProbe: WidthProbe | null = null;
+    // Editor view options (number/relativenumber), seeded from the state db and
+    // written back when `:set` changes them.
+    private editorOptions: VimOptions;
 
     constructor(root: string) {
         this.root = root;
+        const prefs = loadTuiPrefs();
+        this.editorOptions = { number: prefs.number, relativenumber: prefs.relativenumber };
         // Some terminals deliver Ctrl+C as a SIGINT signal rather than as \x03
         // input data; catch that path too so quitting always works.
         process.on("SIGINT", () => this.quit());
@@ -57,6 +66,39 @@ class App {
         });
     }
 
+    /**
+     * Reading position, written on a short debounce: scrolling reports every
+     * line it passes through, and a held-down arrow key shouldn't mean a db
+     * write per row. Flushed on quit so the last position always lands.
+     */
+    private positionTimer: ReturnType<typeof setTimeout> | null = null;
+    private pendingPosition: { path: string; line: number } | null = null;
+
+    private notePosition(path: string, line: number): void {
+        this.pendingPosition = { path, line };
+        if (this.positionTimer) return;
+        this.positionTimer = setTimeout(() => {
+            this.positionTimer = null;
+            this.flushPosition();
+        }, 400);
+    }
+
+    private flushPosition(): void {
+        if (this.positionTimer) {
+            clearTimeout(this.positionTimer);
+            this.positionTimer = null;
+        }
+        const p = this.pendingPosition;
+        this.pendingPosition = null;
+        if (p) savePosition(p.path, p.line);
+    }
+
+    /** `u` cycled the mode: repaint everything, and remember the choice. */
+    private noteUiModeChange(): void {
+        this.tui?.requestRender(true);
+        saveUiMode(activeUiMode().id);
+    }
+
     private mountTui(): TUI {
         const tui = new TUI(new ProcessTerminal());
         this.tui = tui;
@@ -68,10 +110,29 @@ class App {
                 this.quit();
                 return { consume: true };
             }
+            // Cursor-position replies from the width probe are answers to us,
+            // not keystrokes — swallow them before any screen sees them.
+            if (this.widthProbe?.pending) {
+                const rest = this.widthProbe.consume(data);
+                if (rest !== data) {
+                    return rest.length > 0 ? undefined : { consume: true };
+                }
+            }
             return undefined;
         });
         process.stdout.write(ENTER_ALT);
         tui.start();
+        // Ask the live terminal how it lays out stacked scripts; if it
+        // disagrees with the default model, everything measured so far is
+        // wrong, so drop cached layouts and repaint.
+        this.widthProbe = probeTerminalWidths(
+            (data) => process.stdout.write(data),
+            () => {
+                this.viewer?.invalidate();
+                this.browser?.invalidate();
+                this.tui?.requestRender(true);
+            },
+        );
         // After start (matches loop): apply wash once the terminal is live.
         // pi-tui does not cleanse OSC 111 on start, but applying after start
         // still avoids racing raw-mode / bracketed-paste setup.
@@ -104,6 +165,7 @@ class App {
             return;
         }
         this.quitting = true;
+        this.flushPosition();
         this.teardownTui();
         process.exit(0);
     }
@@ -113,11 +175,12 @@ class App {
         if (!this.browser) {
             this.browser = new Browser(this.root);
             this.browser.onOpenFile = (absPath) => void this.showViewer(absPath);
-            this.browser.onUiModeChange = () => this.tui?.requestRender(true);
+            this.browser.onUiModeChange = () => this.noteUiModeChange();
         }
         // Swallow the wheel-momentum arrow tail from the screen we just left
         // (esc mid-scroll in the viewer used to whip the list selection).
         this.browser.noteShown();
+        this.viewer = null;
         tui.clear();
         tui.addChild(this.browser);
         tui.setFocus(this.browser);
@@ -142,12 +205,18 @@ class App {
         const viewer = new ScrollView(title, (width) =>
             renderDocument(readFileSync(absPath, "utf8"), width, kind),
         );
-        viewer.onBack = () => this.showBrowser();
+        viewer.restoreLine = loadPosition(absPath);
+        viewer.onScrollChange = (line) => this.notePosition(absPath, line);
+        viewer.onBack = () => {
+            this.flushPosition();
+            this.showBrowser();
+        };
         viewer.onEdit = () => this.edit(absPath, () => void this.showViewer(absPath));
-        viewer.onUiModeChange = () => this.tui?.requestRender(true);
+        viewer.onUiModeChange = () => this.noteUiModeChange();
         viewer.getSource = () => readFileSync(absPath, "utf8");
         viewer.onReplaceSource = (text) => writeFileSync(absPath, text);
         tui.clear();
+        this.viewer = viewer;
         tui.addChild(viewer);
         tui.setFocus(viewer);
         tui.requestRender();
@@ -161,13 +230,16 @@ class App {
         const viewer = new ScrollView(basename(path), (width) =>
             renderDocument(readFileSync(path, "utf8"), width, kind),
         );
+        viewer.restoreLine = loadPosition(path);
+        viewer.onScrollChange = (line) => this.notePosition(path, line);
         viewer.onBack = () => this.quit();
         viewer.getSource = () => readFileSync(path, "utf8");
         viewer.onReplaceSource = (text) => writeFileSync(path, text);
-        viewer.onUiModeChange = () => this.tui?.requestRender(true);
+        viewer.onUiModeChange = () => this.noteUiModeChange();
         // Rebuilding the whole single-file view re-mounts the TUI and re-reads
         // the (possibly edited) file from disk.
         viewer.onEdit = () => this.edit(path, () => void this.showSingle(path));
+        this.viewer = viewer;
         tui.addChild(viewer);
         tui.setFocus(viewer);
         tui.requestRender();
@@ -186,6 +258,7 @@ class App {
             options: this.editorOptions,
             onOptionsChange: (opts) => {
                 this.editorOptions = opts;
+                saveEditorOptions(opts);
             },
             requestRender: () => this.tui?.requestRender(),
             onSave: (text) => {
@@ -197,6 +270,7 @@ class App {
                 rebuild();
             },
         });
+        this.viewer = null;
         tui.clear();
         tui.addChild(editor);
         tui.setFocus(editor);

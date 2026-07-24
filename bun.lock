@@ -5,8 +5,9 @@
     "": {
       "name": "@notshekhar/md",
       "dependencies": {
-        "@earendil-works/pi-tui": "^0.79.4",
+        "@earendil-works/pi-tui": "0.79.4",
         "chalk": "^5.5.0",
+        "get-east-asian-width": "^1.6.0",
         "highlight.js": "^11.11.1",
         "marked": "^14.1.4",
         "shiki": "^4.2.0",
@@ -15,6 +16,9 @@
         "@types/bun": "latest",
       },
     },
+  },
+  "patchedDependencies": {
+    "@earendil-works/pi-tui@0.79.4": "patches/@earendil-works%2Fpi-tui@0.79.4.patch",
   },
   "packages": {
     "@earendil-works/pi-tui": ["@earendil-works/pi-tui@0.79.4", "", { "dependencies": { "get-east-asian-width": "1.6.0", "marked": "15.0.12" } }, "sha512-/ZhfFiHSBMH7AbDrBQIN+UWlJnl9tSEpLYICRGGMzmNfyCqX+30NYacIhyOEaD8R5rS6wJZysAOPU0yNwigbXw=="],

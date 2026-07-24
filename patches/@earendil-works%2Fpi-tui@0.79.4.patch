@@ -1,0 +1,41 @@
+diff --git a/dist/utils.d.ts b/dist/utils.d.ts
+index 95fb2aa6b6746d34650d5692a5b66c260967393f..45092c49f198019522977045b338b8ebef670e5c 100644
+--- a/dist/utils.d.ts
++++ b/dist/utils.d.ts
+@@ -10,6 +10,7 @@ export declare const cjkBreakRegex: RegExp;
+ /**
+  * Calculate the visible width of a string in terminal columns.
+  */
++export declare function setGraphemeWidthOverride(fn: ((segment: string) => number | undefined) | null): void;
+ export declare function visibleWidth(str: string): number;
+ export declare function normalizeTerminalOutput(str: string): string;
+ /**
+diff --git a/dist/utils.js b/dist/utils.js
+index bc550a400f3ac921263a8f2fa1753335b4fded8c..32f49f58603f595c077254cd9a84da227d1edf15 100644
+--- a/dist/utils.js
++++ b/dist/utils.js
+@@ -135,7 +135,24 @@ function finalizeTruncatedResult(prefix, prefixWidth, ellipsis, ellipsisWidth, m
+  * Based on code from the string-width library, but includes a possible-emoji
+  * check to avoid running the RGI_Emoji regex unnecessarily.
+  */
++// ── md patch ───────────────────────────────────────────────────────────────
++// Upstream measures a grapheme cluster as its base codepoint, which is wrong
++// for Devanagari and friends: terminals lay out each spacing mark in its own
++// cell, so "भाषा" is 4 cells, not 2. Rather than fork the width tables, expose
++// a hook — md installs its own model (src/width.ts), calibrated against the
++// live terminal. Unset, behaviour is exactly upstream's.
++let graphemeWidthOverride = null;
++export function setGraphemeWidthOverride(fn) {
++    graphemeWidthOverride = typeof fn === "function" ? fn : null;
++    widthCache.clear();
++}
+ function graphemeWidth(segment) {
++    if (graphemeWidthOverride) {
++        const overridden = graphemeWidthOverride(segment);
++        if (typeof overridden === "number") {
++            return overridden;
++        }
++    }
+     if (segment === "\t") {
+         return 3;
+     }

@@ -7,7 +7,14 @@ import { prewarmHighlighter } from "./highlight.ts";
 import { docKind } from "./file-list.ts";
 import { getVersion, runUpgrade } from "./commands.ts";
 import { resolveUiModeFromEnv, setActiveUiMode } from "./ui-mode.ts";
+import { loadTuiPrefs } from "./tui-state.ts";
+import { installWidthModel } from "./width.ts";
 import { runServe } from "./serve.ts";
+
+// Measure complex scripts (Devanagari, Thai, Hangul jamo) the way terminals
+// actually lay them out, before anything renders. The interactive UI refines
+// this with a live probe; print mode keeps these defaults.
+installWidthModel();
 
 const HELP = `markdown — render markdown (and tex) in your terminal
 
@@ -125,7 +132,7 @@ async function main(): Promise<void> {
             uiFlag = args[i].slice("--ui=".length);
         }
     }
-    setActiveUiMode(resolveUiModeFromEnv(uiFlag));
+    setActiveUiMode(resolveUiModeFromEnv(uiFlag, loadTuiPrefs().uiMode));
 
     const flagTakesValue = new Set(["--ui", "--port", "--host"]);
     const positional = args.filter(

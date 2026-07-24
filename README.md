@@ -109,14 +109,18 @@ Two builtin looks — pure TypeScript, no extra packages:
 
 | Mode   | Look |
 | ------ | ---- |
-| `md`   | Classic cyan header pill, no canvas wash (default) |
-| `noir` | Dark cockpit: OSC 11 background wash, `◆` header, `┃` content gutters, magenta accents |
+| `md`   | Jade header pill, no canvas wash (default) |
+| `noir` | Dark cockpit: OSC 11 background wash, `◆` header, `┃` content gutters, jade accents |
 
 ```bash
 markdown resume/draft-resume-1.0.tex --ui noir
 MD_UI_MODE=noir markdown .
 # or press `u` inside the viewer to cycle
 ```
+
+The mode you pick with `u` is remembered, along with your editor `:set`
+options and the line you stopped reading at in each file — all in
+`~/.markdown/state.db`, the same store `markdown serve` uses.
 
 ## Features
 
@@ -131,6 +135,12 @@ MD_UI_MODE=noir markdown .
 - **Mermaid** — `graph`/`flowchart` diagrams drawn as labeled flows. Set
   `MD_MERMAID_IMAGES=1` to render diagrams as inline images via the mermaid CLI
   on terminals that support images (iTerm2/kitty).
+- **Code blocks** are framed cards with the language on the border, matching
+  the web UI; long lines wrap inside the frame.
+- **Complex scripts** — Devanagari, Thai, Hangul jamo and friends are measured
+  in terminal cells, not grapheme clusters, so tables and frames stay square
+  in Hindi as they do in English. Terminals disagree about cluster layout, so
+  the viewer probes yours at startup and lays out to match.
 
 ## Editing
 

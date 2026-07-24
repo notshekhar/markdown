@@ -6,16 +6,26 @@ import { join } from "node:path";
 const dir = mkdtempSync(join(tmpdir(), "md-state-"));
 process.env.MARKDOWN_CONFIG_DIR = dir;
 
-const { closeDb, configDir, DB_FILE_NAME, getDb, pushRecent, readState, writePrefs, writeRootState } = await import(
-    "./state-db.ts"
-);
+const {
+    closeDb,
+    configDir,
+    DB_FILE_NAME,
+    getDb,
+    pushRecent,
+    readPosition,
+    readPrefs,
+    readState,
+    writePosition,
+    writePrefs,
+    writeRootState,
+} = await import("./state-db.ts");
 
 const ROOT_A = "/tmp/docs-a";
 const ROOT_B = "/tmp/docs-b";
 
 beforeEach(() => {
     const db = getDb();
-    db.exec("DELETE FROM recent; DELETE FROM root_state; DELETE FROM roots; DELETE FROM prefs;");
+    db.exec("DELETE FROM recent; DELETE FROM root_state; DELETE FROM roots; DELETE FROM prefs; DELETE FROM positions;");
 });
 
 afterAll(() => {
@@ -76,6 +86,33 @@ describe("state db", () => {
         expect(recent).toHaveLength(20);
         expect(recent[0]).toBe("f24.md");
         expect(recent).not.toContain("f0.md");
+    });
+
+    test("terminal prefs share the store with the web UI's", () => {
+        writePrefs({ theme: "dark", uiMode: "noir", editorNumber: "0" });
+        expect(readPrefs()).toEqual({ theme: "dark", uiMode: "noir", editorNumber: "0" });
+    });
+
+    test("reading positions round-trip per file", () => {
+        writePosition("/docs/a.md", 42);
+        writePosition("/docs/b.md", 7);
+        expect(readPosition("/docs/a.md")).toBe(42);
+        expect(readPosition("/docs/b.md")).toBe(7);
+        expect(readPosition("/docs/never-opened.md")).toBeNull();
+    });
+
+    test("scrolling back to the top forgets the position", () => {
+        writePosition("/docs/a.md", 42);
+        writePosition("/docs/a.md", 0);
+        expect(readPosition("/docs/a.md")).toBeNull();
+    });
+
+    test("positions are capped at 500 files, newest kept", () => {
+        for (let i = 0; i < 520; i++) writePosition(`/docs/f${i}.md`, i + 1);
+        const count = getDb().query<{ n: number }, []>("SELECT COUNT(*) AS n FROM positions").get();
+        expect(count?.n).toBe(500);
+        expect(readPosition("/docs/f519.md")).toBe(520);
+        expect(readPosition("/docs/f0.md")).toBeNull();
     });
 
     test("state survives a reopen", () => {

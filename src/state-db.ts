@@ -16,7 +16,7 @@ import { existsSync, mkdirSync, renameSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS meta (
@@ -51,14 +51,27 @@ CREATE TABLE IF NOT EXISTS recent (
     PRIMARY KEY (root_id, path)
 );
 CREATE INDEX IF NOT EXISTS idx_recent_root ON recent(root_id, opened_at DESC);
+
+CREATE TABLE IF NOT EXISTS positions (
+    path       TEXT PRIMARY KEY,
+    line       INTEGER NOT NULL,
+    updated_at INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_positions_seen ON positions(updated_at DESC);
 `;
 
 /** Per-root keys the client is allowed to store (JSON values). */
 const ROOT_KEYS = new Set(["expanded", "emptyDirs", "buffers"]);
-/** Global keys the client is allowed to store (string values). */
-const PREF_KEYS = new Set(["theme", "font", "sidebar"]);
+/**
+ * Global keys any caller may store (string values). theme/font/sidebar are the
+ * web UI's; uiMode/editorNumber/editorRelativeNumber are the terminal UI's —
+ * one store, so `md` and `md serve` are the same install, not two apps.
+ */
+const PREF_KEYS = new Set(["theme", "font", "sidebar", "uiMode", "editorNumber", "editorRelativeNumber"]);
 /** Recent list is capped so the table can't grow without bound. */
 const RECENT_LIMIT = 20;
+/** Ditto for remembered reading positions. */
+const POSITION_LIMIT = 500;
 
 export const DB_FILE_NAME = "state.db";
 
@@ -100,6 +113,21 @@ function openDb(path: string, recovered = false): Database {
             candidate.run("INSERT OR IGNORE INTO meta (key, value) VALUES ('schema_version', ?)", [
                 String(SCHEMA_VERSION),
             ]);
+            // Every migration so far has been "a new table", which the SCHEMA
+            // exec above already created — the stamp is the whole migration.
+            // A db from a newer build is left alone rather than half-read.
+            const row = candidate
+                .query<{ value: string }, []>("SELECT value FROM meta WHERE key = 'schema_version'")
+                .get();
+            const version = Number(row?.value ?? SCHEMA_VERSION);
+            if (version > SCHEMA_VERSION) {
+                throw new Error(
+                    `state db ${path} is schema v${version}, newer than this build (v${SCHEMA_VERSION}) — upgrade markdown`,
+                );
+            }
+            if (version < SCHEMA_VERSION) {
+                candidate.run("UPDATE meta SET value = ? WHERE key = 'schema_version'", [String(SCHEMA_VERSION)]);
+            }
             return candidate;
         } catch (err) {
             candidate?.close();
@@ -170,6 +198,15 @@ export function readState(root: string): UiState {
     return { prefs, root: rootState, recent };
 }
 
+/** Global prefs only — the terminal UI has no served root to scope to. */
+export function readPrefs(): Record<string, string> {
+    const prefs: Record<string, string> = {};
+    for (const r of getDb().query<{ key: string; value: string }, []>("SELECT key, value FROM prefs").all()) {
+        prefs[r.key] = r.value;
+    }
+    return prefs;
+}
+
 export function writePrefs(patch: Record<string, unknown>): void {
     const now = Date.now();
     for (const [key, value] of Object.entries(patch)) {
@@ -193,6 +230,39 @@ export function writeRootState(root: string, patch: Record<string, unknown>): vo
             [id, key, JSON.stringify(value), now],
         );
     }
+}
+
+/**
+ * Reading position (top visible line) for a file, keyed by absolute path — the
+ * terminal viewer reopens where you left off. Absent → start at the top.
+ */
+export function readPosition(path: string): number | null {
+    const row = getDb().query<{ line: number }, [string]>("SELECT line FROM positions WHERE path = ?").get(path);
+    return row ? row.line : null;
+}
+
+export function writePosition(path: string, line: number): void {
+    if (!path) return;
+    // Line 0 is the default view, so it is stored as "forget this file"
+    // rather than as a position to restore.
+    if (line <= 0) {
+        getDb().run("DELETE FROM positions WHERE path = ?", [path]);
+        return;
+    }
+    // Forced past the newest row rather than trusting the clock: several files
+    // touched inside one millisecond would otherwise tie, and the trim below
+    // would then evict arbitrary rows instead of the oldest.
+    getDb().run(
+        `INSERT INTO positions (path, line, updated_at)
+         VALUES (?, ?, MAX(?, COALESCE((SELECT MAX(updated_at) FROM positions) + 1, 0)))
+         ON CONFLICT(path) DO UPDATE SET line = excluded.line, updated_at = excluded.updated_at`,
+        [path, Math.floor(line), Date.now()],
+    );
+    getDb().run(
+        `DELETE FROM positions WHERE path NOT IN
+         (SELECT path FROM positions ORDER BY updated_at DESC LIMIT ?)`,
+        [POSITION_LIMIT],
+    );
 }
 
 /** Record a file open; re-opening an old file moves it back to the front. */
