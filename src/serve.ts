@@ -709,7 +709,7 @@ body > * { position: relative; z-index: 1; }
   flex-shrink: 0;
 }
 .tab:hover { background: var(--bg-hover); color: var(--fg); }
-.tab.active { background: var(--bg-elev); color: var(--fg); border-color: var(--border); box-shadow: var(--shadow-lg); }
+.tab.active { background: var(--bg-elev); color: var(--fg); border-color: var(--border); }
 .tab.dragging { opacity: .45; }
 .tab.drop-before { box-shadow: inset 3px 0 0 var(--accent); }
 .tab.drop-after { box-shadow: inset -3px 0 0 var(--accent); }
