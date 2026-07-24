@@ -1216,9 +1216,9 @@ html[data-theme="dark"] .article .shiki span { color: var(--shiki-dark) !importa
   top: 0;
   left: 0;
   transform-origin: 0 0;
-  will-change: transform;
+  /* ponytail: no will-change — it snapshots the SVG as a bitmap and zoom goes blurry */
 }
-.mmd-stage svg { display: block; max-width: none !important; }
+.mmd-stage svg { display: block; max-width: none !important; shape-rendering: geometricPrecision; }
 .mmd-hint {
   position: absolute;
   left: .55rem;
