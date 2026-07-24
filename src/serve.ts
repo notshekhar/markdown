@@ -1184,7 +1184,9 @@ html[data-theme="dark"] .json-null { color: #f87171; }
 }
 .article .shiki { background: transparent !important; }
 html[data-theme="dark"] .article .shiki,
-html[data-theme="dark"] .article .shiki span { color: var(--shiki-dark) !important; }
+html[data-theme="dark"] .article .shiki span,
+html[data-theme="dark"] .full-overlay .shiki,
+html[data-theme="dark"] .full-overlay .shiki span { color: var(--shiki-dark) !important; }
 .article blockquote {
   margin: 1.3em 0;
   padding: .3em 0 .3em 1.15em;
