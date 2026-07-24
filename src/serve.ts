@@ -1144,16 +1144,122 @@ html[data-theme="dark"] .article .shiki span { color: var(--shiki-dark) !importa
 .article hr { border: none; border-top: 1px solid var(--border); margin: 2.5em 0; }
 .article img { max-width: 100%; height: auto; border-radius: 0; border: 1px solid var(--border-soft); }
 .article .katex-display { overflow-x: auto; overflow-y: hidden; padding: .5em 0; }
-.mermaid {
-  background: var(--bg-elev);
-  border: 1px solid var(--border);
-  border-radius: 0;
-  padding: 1.1rem;
+/* ── mermaid: a pannable / zoomable diagram card ─────────── */
+.mmd-card {
   margin: 1.4em 0;
-  text-align: center;
-  overflow-x: auto;
+  border: 1px solid var(--code-border);
+  border-radius: 0;
+  background: var(--code-bg);
+  overflow: hidden;
 }
-.mermaid svg { max-width: 100%; height: auto; }
+.mmd-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: .5rem;
+  padding: .35rem .5rem .35rem .95rem;
+  background: var(--code-head-bg);
+  border-bottom: 1px solid var(--code-border);
+}
+.mmd-lang {
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  text-transform: uppercase;
+  letter-spacing: .08em;
+  color: var(--fg-faint);
+  font-weight: 600;
+}
+.mmd-tools { display: flex; align-items: center; gap: .12rem; }
+.mmd-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 0;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.mmd-btn:hover { color: var(--fg); background: var(--bg-hover); }
+.mmd-btn:active { color: var(--accent); }
+.mmd-btn.done { color: #22c55e; }
+.mmd-zoom {
+  min-width: 3.6em;
+  padding: .2rem .2rem;
+  border: 1px solid transparent;
+  background: transparent;
+  font-family: var(--font-mono);
+  font-size: .68rem;
+  color: var(--fg-faint);
+  text-align: center;
+  cursor: pointer;
+  font-variant-numeric: tabular-nums;
+}
+.mmd-zoom:hover { color: var(--fg); background: var(--bg-hover); }
+.mmd-view {
+  position: relative;
+  overflow: hidden;
+  height: 320px;
+  touch-action: none;
+  cursor: grab;
+  background-image: radial-gradient(circle at 1px 1px, var(--border) 1px, transparent 0);
+  background-size: 20px 20px;
+}
+.mmd-view.dragging { cursor: grabbing; }
+.mmd-view:focus { outline: none; }
+.mmd-view:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.mmd-stage {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+.mmd-stage svg { display: block; max-width: none !important; }
+.mmd-hint {
+  position: absolute;
+  left: .55rem;
+  bottom: .5rem;
+  padding: .18rem .45rem;
+  font-family: var(--font-mono);
+  font-size: .66rem;
+  color: var(--fg-faint);
+  background: color-mix(in srgb, var(--bg-elev) 85%, transparent);
+  border: 1px solid var(--border-soft);
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity .16s;
+}
+.mmd-card:hover .mmd-hint, .mmd-view:focus-visible ~ .mmd-hint { opacity: 1; }
+/* mermaid failed to parse → fall back to the source */
+.mmd-card.failed .mmd-view { height: auto; cursor: default; background-image: none; }
+.mmd-card.failed .mmd-stage { position: static; }
+.mmd-card.failed .mmd-hint { display: none; }
+.mmd-card.failed pre { margin: 0; padding: 1rem; font-family: var(--font-mono); font-size: .8rem; color: var(--fg-muted); white-space: pre-wrap; }
+
+.mmd-full-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: none;
+  padding: clamp(.75rem, 3vh, 2.2rem);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(4px);
+}
+.mmd-full-overlay.open { display: flex; }
+.mmd-full-overlay .mmd-card {
+  margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+}
+.mmd-full-overlay .mmd-view { flex: 1; }
 
 /* ── command palette ─────────────────────────────────────── */
 .palette-overlay {
@@ -1516,6 +1622,8 @@ details.dir > summary.drop-into {
 
 <div class="modal-overlay" id="modal-overlay"></div>
 
+<div class="mmd-full-overlay" id="mmd-full"></div>
+
 <div class="toast" id="toast"></div>
 
 <div class="help-overlay" id="help-overlay">
@@ -1704,7 +1812,23 @@ const renderer = {
     if (language === "mermaid") {
       const id = "mmd-" + (++mermaidId);
       const safe = text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
-      return '<div class="mermaid" id="'+id+'">'+safe+'</div>';
+      // first word of the source names the diagram type (flowchart, sequenceDiagram, …)
+      const first = (text.trim().split(/\\n/)[0] || "").trim().split(/[\\s:]/)[0];
+      const kind = /^[A-Za-z-]+$/.test(first) ? first : "mermaid";
+      return '<div class="mmd-card" data-src="'+esc(text)+'">'+
+        '<div class="mmd-head"><span class="mmd-lang">'+esc(kind)+'</span>'+
+        '<div class="mmd-tools">'+
+          '<button class="mmd-btn" data-mmd="out" type="button" title="Zoom out (−)">'+zoomOutIcon()+'</button>'+
+          '<button class="mmd-zoom" data-mmd="reset" type="button" title="Fit to view (0)">100%</button>'+
+          '<button class="mmd-btn" data-mmd="in" type="button" title="Zoom in (+)">'+zoomInIcon()+'</button>'+
+          '<button class="mmd-btn" data-mmd="fit" type="button" title="Fit to view (0)">'+fitIcon()+'</button>'+
+          '<button class="mmd-btn" data-mmd="full" type="button" title="Fullscreen (f)">'+expandIcon()+'</button>'+
+          '<button class="mmd-btn" data-mmd="copy" type="button" title="Copy diagram source">'+copyIcon()+'</button>'+
+        '</div></div>'+
+        '<div class="mmd-view" tabindex="0" role="img" aria-label="'+esc(kind)+' diagram">'+
+          '<div class="mmd-stage"><div class="mermaid" id="'+id+'">'+safe+'</div></div>'+
+          '<div class="mmd-hint">drag to pan · '+(isMac ? "⌘" : "ctrl")+'+scroll to zoom · double-click to fit</div>'+
+        '</div></div>';
     }
     // Emit a plain, escaped placeholder immediately; shiki upgrades it after
     // the DOM is inserted (see highlightCode). textContent recovers the raw
@@ -2056,13 +2180,252 @@ function renderMathIn(el) {
     throwOnError: false,
   });
 }
+// ── mermaid diagrams: pan, zoom, fullscreen ────────────────
+// Each fenced mermaid block renders into a card whose <svg> sits on a stage we
+// translate/scale. The SVG keeps its natural size, so every zoom level stays
+// vector-crisp; only the stage transform changes.
+const MMD_MIN = 0.1, MMD_MAX = 16;
+function svgIcon(body) {
+  return '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round">'+body+'</svg>';
+}
+function zoomInIcon() { return svgIcon('<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5L16 16M8 11h6M11 8v6"/>'); }
+function zoomOutIcon() { return svgIcon('<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5L16 16M8 11h6"/>'); }
+function fitIcon() { return svgIcon('<path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/>'); }
+function expandIcon() { return svgIcon('<path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/>'); }
+function collapseIcon() { return svgIcon('<path d="M20 4l-7 7M13 4h7v7M4 20l7-7M11 20H4v-7"/>'); }
+
+let mmdFull = null; // the card currently in fullscreen, if any
+const mmdFullOverlay = $("mmd-full");
+mmdFullOverlay.addEventListener("click", (e) => { if (e.target === mmdFullOverlay && mmdFull) mmdFull.exitFull(); });
+
 function runMermaid(el) {
   const nodes = el.querySelectorAll(".mermaid");
   if (!nodes.length || !window.mermaid) return;
   const theme = document.documentElement.getAttribute("data-theme") === "dark" ? "dark" : "default";
   mermaid.initialize({ startOnLoad: false, theme, securityLevel: "loose" });
-  mermaid.run({ nodes }).catch(() => {});
+  // Set diagrams up whether or not every node parsed — a failed one falls back
+  // to its source, and the rest still become interactive.
+  mermaid.run({ nodes }).catch(() => {}).finally(() => {
+    el.querySelectorAll(".mmd-card").forEach(setupDiagram);
+  });
 }
+
+function setupDiagram(card) {
+  if (card.__mmd) { card.__mmd.refit(); return; }
+  const view = card.querySelector(".mmd-view");
+  const stage = card.querySelector(".mmd-stage");
+  const svg = stage && stage.querySelector("svg");
+  if (!view || !stage || !svg) {
+    // mermaid could not draw it: show the source instead of a broken box.
+    card.classList.add("failed");
+    if (stage) {
+      const pre = document.createElement("pre");
+      pre.textContent = card.getAttribute("data-src") || "";
+      stage.replaceChildren(pre);
+    }
+    if (view) view.style.height = "auto";
+    bindDiagramTools(card, null);
+    return;
+  }
+
+  // Natural size, from the viewBox where possible (mermaid always sets one).
+  let nw = 0, nh = 0;
+  const vb = (svg.getAttribute("viewBox") || "").split(/[\\s,]+/).map(Number);
+  if (vb.length === 4 && vb[2] > 0 && vb[3] > 0) { nw = vb[2]; nh = vb[3]; }
+  if (!nw || !nh) { const r = svg.getBoundingClientRect(); nw = r.width || 400; nh = r.height || 300; }
+  svg.removeAttribute("width");
+  svg.removeAttribute("height");
+  svg.style.maxWidth = "none";
+  svg.style.width = nw + "px";
+  svg.style.height = nh + "px";
+
+  let s = 1, tx = 0, ty = 0, fitScale = 1, touched = false, lastWidth = 0;
+  const badge = card.querySelector('[data-mmd="reset"]');
+  const isFull = () => card.classList.contains("full");
+
+  function clampPan() {
+    const W = view.clientWidth, H = view.clientHeight;
+    const cw = nw * s, ch = nh * s;
+    tx = cw <= W ? (W - cw) / 2 : Math.min(0, Math.max(W - cw, tx));
+    ty = ch <= H ? (H - ch) / 2 : Math.min(0, Math.max(H - ch, ty));
+  }
+  function apply() {
+    clampPan();
+    stage.style.transform = "translate("+tx.toFixed(2)+"px,"+ty.toFixed(2)+"px) scale("+s.toFixed(4)+")";
+    if (badge) badge.textContent = Math.round(s * 100) + "%";
+  }
+  function fit() {
+    const W = view.clientWidth || 1, H = view.clientHeight || 1;
+    const pad = 24;
+    fitScale = Math.min((W - pad) / nw, (H - pad) / nh, isFull() ? 2 : 1);
+    if (!(fitScale > 0)) fitScale = 1;
+    s = fitScale;
+    touched = false;
+    apply();
+  }
+  function refit() {
+    // Inline height follows the diagram's aspect, within sane bounds; in
+    // fullscreen the flex layout owns it.
+    if (isFull()) view.style.height = "";
+    else {
+      const W = view.clientWidth || 1;
+      const base = Math.min(1, W / nw);
+      view.style.height = Math.max(200, Math.min(560, Math.round(nh * base) + 28)) + "px";
+    }
+    fit();
+  }
+  function zoomAt(factor, px, py) {
+    const ns = Math.max(MMD_MIN, Math.min(MMD_MAX, s * factor));
+    if (ns === s) return;
+    tx = px - (px - tx) * (ns / s);
+    ty = py - (py - ty) * (ns / s);
+    s = ns;
+    touched = true;
+    apply();
+  }
+  function zoomCenter(factor) { zoomAt(factor, view.clientWidth / 2, view.clientHeight / 2); }
+  function panBy(dx, dy) { tx += dx; ty += dy; touched = true; apply(); }
+
+  // — pointer: drag to pan, two-finger pinch to zoom —
+  const pts = new Map();
+  let last = null, pinch = null;
+  const mid = () => {
+    const [a, b] = [...pts.values()];
+    return { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, d: Math.hypot(a.x - b.x, a.y - b.y) };
+  };
+  view.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0 && e.pointerType === "mouse") return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    try { view.setPointerCapture(e.pointerId); } catch {}
+    if (pts.size === 1) { last = { x: e.clientX, y: e.clientY }; view.classList.add("dragging"); }
+    else if (pts.size === 2) { pinch = mid(); last = null; }
+    e.preventDefault();
+  });
+  view.addEventListener("pointermove", (e) => {
+    if (!pts.has(e.pointerId)) return;
+    pts.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (pts.size >= 2) {
+      const now = mid();
+      if (pinch && pinch.d > 0 && now.d > 0) {
+        const r = view.getBoundingClientRect();
+        zoomAt(now.d / pinch.d, now.x - r.left, now.y - r.top);
+        panBy(now.x - pinch.x, now.y - pinch.y);
+      }
+      pinch = now;
+      return;
+    }
+    if (!last) return;
+    panBy(e.clientX - last.x, e.clientY - last.y);
+    last = { x: e.clientX, y: e.clientY };
+  });
+  const release = (e) => {
+    pts.delete(e.pointerId);
+    if (pts.size < 2) pinch = null;
+    if (pts.size === 0) { last = null; view.classList.remove("dragging"); }
+    else last = [...pts.values()][0];
+  };
+  view.addEventListener("pointerup", release);
+  view.addEventListener("pointercancel", release);
+
+  // — wheel: ⌘/ctrl+scroll (and trackpad pinch) zooms; plain scroll still
+  //   scrolls the page, so the diagram never traps you mid-document —
+  view.addEventListener("wheel", (e) => {
+    if (!e.ctrlKey && !e.metaKey && !isFull()) return;
+    e.preventDefault();
+    const r = view.getBoundingClientRect();
+    zoomAt(Math.exp(-e.deltaY * (e.deltaMode === 1 ? 0.05 : 0.0022)), e.clientX - r.left, e.clientY - r.top);
+  }, { passive: false });
+
+  view.addEventListener("dblclick", (e) => {
+    e.preventDefault();
+    if (touched || s > fitScale * 1.01) { fit(); return; }
+    const r = view.getBoundingClientRect();
+    zoomAt(2.2, e.clientX - r.left, e.clientY - r.top);
+  });
+
+  view.addEventListener("keydown", (e) => {
+    const step = e.shiftKey ? 120 : 40;
+    const k = e.key;
+    if (k === "+" || k === "=") { e.preventDefault(); zoomCenter(1.25); }
+    else if (k === "-" || k === "_") { e.preventDefault(); zoomCenter(0.8); }
+    else if (k === "0") { e.preventDefault(); fit(); }
+    else if (k === "f" || k === "F") { e.preventDefault(); toggleFull(); }
+    else if (k === "ArrowLeft") { e.preventDefault(); panBy(step, 0); }
+    else if (k === "ArrowRight") { e.preventDefault(); panBy(-step, 0); }
+    else if (k === "ArrowUp") { e.preventDefault(); panBy(0, step); }
+    else if (k === "ArrowDown") { e.preventDefault(); panBy(0, -step); }
+  });
+
+  // — fullscreen: the card itself moves into the overlay, so one set of
+  //   handlers serves both modes —
+  let holder = null;
+  function enterFull() {
+    if (mmdFull && mmdFull !== card.__mmd) mmdFull.exitFull();
+    holder = document.createElement("div");
+    card.parentNode.insertBefore(holder, card);
+    mmdFullOverlay.appendChild(card);
+    card.classList.add("full");
+    mmdFullOverlay.classList.add("open");
+    document.body.style.overflow = "hidden";
+    const btn = card.querySelector('[data-mmd="full"]');
+    if (btn) { btn.innerHTML = collapseIcon(); btn.title = "Exit fullscreen (esc)"; }
+    mmdFull = card.__mmd;
+    requestAnimationFrame(() => { refit(); view.focus(); });
+  }
+  function exitFull() {
+    card.classList.remove("full");
+    mmdFullOverlay.classList.remove("open");
+    document.body.style.overflow = "";
+    if (holder && holder.parentNode) holder.parentNode.replaceChild(card, holder);
+    else card.remove(); // the document re-rendered underneath us
+    holder = null;
+    const btn = card.querySelector('[data-mmd="full"]');
+    if (btn) { btn.innerHTML = expandIcon(); btn.title = "Fullscreen (f)"; }
+    if (mmdFull === card.__mmd) mmdFull = null;
+    if (card.isConnected) requestAnimationFrame(refit);
+  }
+  function toggleFull() { isFull() ? exitFull() : enterFull(); }
+
+  card.__mmd = { refit, fit, zoomCenter, toggleFull, exitFull };
+  bindDiagramTools(card, card.__mmd);
+
+  // Re-fit on width changes (sidebar toggle, window resize, split preview),
+  // but never fight a zoom the reader chose.
+  if (window.ResizeObserver) {
+    new ResizeObserver(() => {
+      const w = view.clientWidth;
+      if (w === lastWidth) return;
+      lastWidth = w;
+      if (touched) apply();
+      else refit();
+    }).observe(card);
+  }
+  lastWidth = view.clientWidth;
+  refit();
+}
+
+function bindDiagramTools(card, ctl) {
+  card.querySelectorAll("[data-mmd]").forEach((btn) => {
+    const act = btn.getAttribute("data-mmd");
+    if (act === "copy") {
+      btn.onclick = () => {
+        copyText(card.getAttribute("data-src") || "");
+        btn.innerHTML = fitCheckIcon();
+        btn.classList.add("done");
+        toast("Diagram source copied");
+        setTimeout(() => { btn.innerHTML = copyIcon(); btn.classList.remove("done"); }, 1400);
+      };
+      return;
+    }
+    if (!ctl) { btn.disabled = true; btn.style.opacity = ".4"; return; }
+    if (act === "in") btn.onclick = () => ctl.zoomCenter(1.25);
+    else if (act === "out") btn.onclick = () => ctl.zoomCenter(0.8);
+    else if (act === "fit" || act === "reset") btn.onclick = () => ctl.fit();
+    else if (act === "full") btn.onclick = () => ctl.toggleFull();
+  });
+}
+function fitCheckIcon() { return svgIcon('<path d="M20 6L9 17l-5-5"/>'); }
+
 function enrich(el) { renderMathIn(el); runMermaid(el); bindCopyButtons(el); highlightCode(el); }
 
 // ── file-op UI: refs, icons, toast, modal, context menu ─────
@@ -2448,6 +2811,14 @@ const SHORTCUTS = [
   { sec: "Files (sidebar)", rows: [
     { keys: ["Right-click"], desc: "New · rename · delete" },
     { keys: ["Drag → folder"], desc: "Move a file into a folder" },
+  ] },
+  { sec: "Diagrams (mermaid)", rows: [
+    { keys: ["Drag"], desc: "Pan the diagram" },
+    { keys: ["Cmd", "Scroll"], desc: "Zoom at the pointer (or pinch)" },
+    { keys: ["Double-click"], desc: "Zoom in · back to fit" },
+    { keys: ["+", "−"], desc: "Zoom in / out (diagram focused)" },
+    { keys: ["0"], desc: "Fit to view" },
+    { keys: ["F"], desc: "Fullscreen · Esc to leave" },
   ] },
 ];
 function openHelp() {
@@ -2910,6 +3281,7 @@ document.addEventListener("keydown", (e) => {
   // 1. Dismiss any transient UI first.
   if (e.key === "Escape") {
     if (ctxMenu.classList.contains("open")) { e.preventDefault(); closeContextMenu(); return; }
+    if (mmdFull) { e.preventDefault(); mmdFull.exitFull(); return; }
     if (helpOverlay.classList.contains("open")) { e.preventDefault(); closeHelp(); return; }
   }
   if (modalOverlay.classList.contains("open")) return; // the modal owns its keys
