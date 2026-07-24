@@ -530,7 +530,7 @@ function pageHtml(bootPath: string, rootName: string, rootKey: string): string {
   --tabs-h: 0px; /* becomes non-zero when buffers are open (html.has-tabs) */
 }
 :root.has-tabs { --tabs-h: 42px; }
-html { scroll-padding-top: calc(var(--bar-h) + var(--tabs-h) + 16px); }
+html { scroll-padding-top: calc(var(--bar-h) + var(--tabs-h) + 16px); -webkit-text-size-adjust: 100%; }
 html, body { margin: 0; }
 body {
   --font-sans: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
@@ -1615,6 +1615,15 @@ details.dir > summary.drop-into {
   .layout.no-sidebar { grid-template-columns: 0 minmax(0,1fr) 0; }
   .toc { display: none; }
 }
+/* dim the page behind the open drawer (mobile) */
+.side-scrim {
+  display: none;
+  position: fixed;
+  inset: var(--bar-h) 0 0 0;
+  z-index: 39;
+  background: rgba(3,4,8,.45);
+}
+
 @media (max-width: 760px) {
   .appbar { padding: 0 .6rem; gap: .35rem; }
   .brand .root, .crumbs { display: none; }
@@ -1622,11 +1631,14 @@ details.dir > summary.drop-into {
   .search-btn .lbl, .search-btn kbd { display: none; }
   /* full-bleed reading column; match specificity of the tablet rule so these win */
   .layout, .layout.no-sidebar, .layout.no-toc, .layout.no-sidebar.no-toc { grid-template-columns: 0 minmax(0,1fr) 0; }
-  .sidebar { position: absolute; inset: var(--bar-h) 0 0 0; width: min(320px, 86vw); z-index: 40; box-shadow: var(--shadow-lg); }
+  .sidebar { position: fixed; top: var(--bar-h); left: 0; bottom: 0; width: min(320px, 86vw); z-index: 40; box-shadow: var(--shadow-lg); }
   .layout.no-sidebar .sidebar { display: none; }
   .layout:not(.no-sidebar) .sidebar { display: flex; }
+  .layout:not(.no-sidebar) .side-scrim { display: block; }
   .article { padding: 1.75rem 1.15rem 4rem; }
+  .article h1 { font-size: 1.55rem; }
   .home { padding: 2rem 1.15rem; }
+  .doc-actions { position: static; margin-bottom: .8rem; }
 }
 </style>
 </head>
@@ -1683,6 +1695,7 @@ details.dir > summary.drop-into {
     </div>
     <div class="tree" id="tree"></div>
   </aside>
+  <div class="side-scrim" id="side-scrim"></div>
   <main class="main" id="main">
     <div class="tabs" id="tabs"></div>
     <div id="main-content"><div class="empty">loading…</div></div>
@@ -1893,6 +1906,15 @@ if (STATE.prefs.sidebar === "0") {
   layout.classList.add("no-sidebar");
   $("btn-sidebar").classList.remove("active");
 }
+// phones: always start with the drawer closed, whatever the desktop pref says
+if (window.innerWidth <= 760) {
+  layout.classList.add("no-sidebar");
+  $("btn-sidebar").classList.remove("active");
+}
+$("side-scrim").onclick = () => {
+  layout.classList.add("no-sidebar");
+  $("btn-sidebar").classList.remove("active");
+};
 
 // ── marked + highlight ─────────────────────────────────────
 const renderer = {
