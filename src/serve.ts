@@ -1345,7 +1345,7 @@ html[data-theme="dark"] .article .shiki span { color: var(--shiki-dark) !importa
   overflow: auto;
   max-height: none;
 }
-.full-overlay .code-wrap pre { margin: 0; }
+.full-overlay .code-wrap pre { margin: 0; padding: 1rem 1.15rem; }
 
 /* ── command palette ─────────────────────────────────────── */
 .palette-overlay {
@@ -2342,7 +2342,7 @@ function zoomInIcon() { return svgIcon('<circle cx="11" cy="11" r="7"/><path d="
 function zoomOutIcon() { return svgIcon('<circle cx="11" cy="11" r="7"/><path d="M20.5 20.5L16 16M8 11h6"/>'); }
 function fitIcon() { return svgIcon('<path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4"/>'); }
 function expandIcon() { return svgIcon('<path d="M14 4h6v6M20 4l-7 7M10 20H4v-6M4 20l7-7"/>'); }
-function collapseIcon() { return svgIcon('<path d="M20 4l-7 7M13 4h7v7M4 20l7-7M11 20H4v-7"/>'); }
+function collapseIcon() { return svgIcon('<path d="M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7"/>'); }
 
 let mmdFull = null; // the card currently in fullscreen, if any
 const mmdFullOverlay = $("mmd-full");
