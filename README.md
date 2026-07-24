@@ -13,6 +13,12 @@ Prebuilt binary (no node/bun required):
 curl -fsSL https://raw.githubusercontent.com/notshekhar/markdown/main/install.sh | bash
 ```
 
+Windows (PowerShell):
+
+```powershell
+irm https://raw.githubusercontent.com/notshekhar/markdown/main/install.ps1 | iex
+```
+
 From source:
 
 ```bash
@@ -50,7 +56,13 @@ markdown serve --no-open       # print URL only
 
 Same features as the terminal renderer: GFM markdown, code highlighting,
 KaTeX math, mermaid diagrams, and `.tex` → readable preview. Header toggle
-switches light/dark (saved in `localStorage`).
+switches light/dark.
+
+UI state — theme, font, sidebar, open tabs, expanded folders and recent files
+— is stored server-side in `~/.markdown/state.db` (SQLite), not in the
+browser, so it follows you across browsers and private windows. Set
+`MARKDOWN_CONFIG_DIR` to put it elsewhere; deleting the file just resets the
+UI to defaults.
 
 The command is `markdown` (a `md` alias is also installed, but many shells
 already alias `md` to `mkdir`, which would shadow it).

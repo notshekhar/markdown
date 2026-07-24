@@ -46,12 +46,115 @@ ver_gt() {
   [ "$(printf '%s\n%s\n' "$a" "$b" | sort -V | head -n1)" = "$b" ]
 }
 
+# ── Download progress bar (opencode-style) ─────────────────────────────────
+# curl writes a --trace-ascii stream into a FIFO; we parse content-length and
+# `<= recv data` records live and draw a ■■■･･･ 42% bar on stderr. Only used
+# when stderr is a TTY; anything else (or any failure) falls back to plain
+# curl in the caller.
+
+# sed with unbuffered output — GNU (-u), BSD/macOS (-l), else pad each line
+# past the libc buffer so records flush through the pipe as they happen.
+unbuffered_sed() {
+  if echo | sed -u -e "" >/dev/null 2>&1; then
+    sed -nu "$@"
+  elif echo | sed -l -e "" >/dev/null 2>&1; then
+    sed -nl "$@"
+  else
+    local pad="$(printf "\n%512s" "")"
+    sed -ne "s/$/\\${pad}/" "$@"
+  fi
+}
+
+PROGRESS_COLOR='\033[38;5;215m'
+PROGRESS_NC='\033[0m'
+
+print_progress() {
+  local bytes="$1" length="$2"
+  [ "$length" -gt 0 ] || return 0
+
+  local width=50
+  local percent=$(( bytes * 100 / length ))
+  [ "$percent" -gt 100 ] && percent=100
+  local on=$(( percent * width / 100 ))
+  local off=$(( width - on ))
+
+  local filled=$(printf "%*s" "$on" "")
+  filled=${filled// /■}
+  local empty=$(printf "%*s" "$off" "")
+  empty=${empty// /･}
+
+  printf "\r${PROGRESS_COLOR}%s%s %3d%%${PROGRESS_NC}" "$filled" "$empty" "$percent" >&4
+}
+
+download_with_progress() {
+  local url="$1" output="$2"
+
+  if [ -t 2 ]; then
+    exec 4>&2
+  else
+    exec 4>/dev/null
+  fi
+
+  local tmp_dir="${TMPDIR:-/tmp}"
+  local tracefile="${tmp_dir}/md_install_$$.trace"
+
+  rm -f "$tracefile"
+  mkfifo "$tracefile" 2>/dev/null || return 1
+
+  # Hide the cursor while the bar redraws; always restore it on the way out.
+  printf "\033[?25l" >&4
+  trap "trap - RETURN; rm -f \"$tracefile\"; printf '\033[?25h' >&4; exec 4>&-" RETURN
+
+  # -f so an HTTP error fails the download (and the caller's fallback runs)
+  # instead of tracing a 404 page into the output file.
+  (
+    curl -f --trace-ascii "$tracefile" -s -L -o "$output" "$url"
+  ) &
+  local curl_pid=$!
+
+  unbuffered_sed \
+    -e 'y/ACDEGHLNORTV/acdeghlnortv/' \
+    -e '/^0000: content-length:/p' \
+    -e '/^<= recv data/p' \
+    "$tracefile" | \
+  {
+    local length=0 bytes=0
+
+    while IFS=" " read -r -a line; do
+      [ "${#line[@]}" -lt 2 ] && continue
+      local tag="${line[0]} ${line[1]}"
+
+      if [ "$tag" = "0000: content-length:" ]; then
+        # Each response in a redirect chain restarts the count; the final
+        # (asset) response's length is the one the bar ends up tracking.
+        length="${line[2]}"
+        length=$(echo "$length" | tr -d '\r')
+        bytes=0
+      elif [ "$tag" = "<= recv" ]; then
+        local size="${line[3]}"
+        bytes=$(( bytes + size ))
+        if [ "$length" -gt 0 ]; then
+          print_progress "$bytes" "$length"
+        fi
+      fi
+    done
+  }
+
+  wait $curl_pid
+  local ret=$?
+  echo "" >&4
+  return $ret
+}
+
 detect_target() {
   local os arch
   case "$(uname -s)" in
     Darwin) os="darwin" ;;
     Linux)  os="linux" ;;
-    MINGW*|MSYS*|CYGWIN*) err "Windows: download the binary from the Releases page."; exit 1 ;;
+    MINGW*|MSYS*|CYGWIN*)
+      err "Windows: run the PowerShell installer instead —"
+      err "  irm https://raw.githubusercontent.com/${REPO_SLUG}/main/install.ps1 | iex"
+      exit 1 ;;
     *) err "unsupported OS: $(uname -s)"; exit 1 ;;
   esac
   case "$(uname -m)" in
@@ -127,7 +230,12 @@ main() {
   tar="$scratch/md.tar.gz"
 
   bold "▶ Downloading ${url##*/}"
-  curl -fL --progress-bar "$url" -o "$tar" || { err "download failed: $url"; exit 1; }
+  # Fancy ■■■･･･ 42% bar on a TTY; plain curl everywhere else (non-TTY, or
+  # if the traced download fails for any reason — including HTTP errors,
+  # where the retry surfaces curl's own message).
+  if ! { [ -t 2 ] && download_with_progress "$url" "$tar"; }; then
+    curl -fL --progress-bar "$url" -o "$tar" || { err "download failed: $url"; exit 1; }
+  fi
 
   if curl -fsSL "${url}.sha256" -o "$scratch/sum" 2>/dev/null && [ -s "$scratch/sum" ]; then
     local expected got
