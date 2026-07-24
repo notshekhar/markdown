@@ -1096,6 +1096,29 @@ textarea.ed-input {
 }
 .copy-btn:hover { color: var(--fg); background: var(--bg-hover); }
 .copy-btn.done { color: #22c55e; }
+.code-tools { display: flex; align-items: center; gap: .12rem; }
+.code-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 24px;
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--fg-muted);
+  border-radius: 0;
+  cursor: pointer;
+  transition: background .12s, color .12s;
+}
+.code-btn:hover { color: var(--fg); background: var(--bg-hover); }
+.table-wrap {
+  margin: 1.4em 0;
+  border: 1px solid var(--code-border);
+  border-radius: 0;
+  overflow: hidden;
+  background: var(--code-bg);
+}
+.table-scroll { overflow: auto; max-height: 70vh; }
 .article pre {
   margin: 0;
   padding: 1rem 1.15rem;
@@ -1126,21 +1149,18 @@ html[data-theme="dark"] .article .shiki span { color: var(--shiki-dark) !importa
 .article blockquote code, .article blockquote .katex { font-style: normal; }
 .article ul, .article ol { padding-left: 1.4em; }
 .article li { margin: .3em 0; }
-.article table {
+.table-wrap table {
   border-collapse: collapse;
   width: 100%;
-  margin: 1.4em 0;
   font-size: .92rem;
-  display: block;
-  overflow-x: auto;
 }
-.article th, .article td {
+.table-wrap th, .table-wrap td {
   border: 1px solid var(--border);
   padding: .5em .75em;
   text-align: left;
 }
-.article th { background: var(--bg-elev); font-weight: 650; color: var(--fg); }
-.article tr:nth-child(2n) td { background: var(--bg-hover); }
+.table-wrap th { background: var(--bg-elev); font-weight: 650; color: var(--fg); }
+.table-wrap tr:nth-child(2n) td { background: var(--bg-hover); }
 .article hr { border: none; border-top: 1px solid var(--border); margin: 2.5em 0; }
 .article img { max-width: 100%; height: auto; border-radius: 0; border: 1px solid var(--border-soft); }
 .article .katex-display { overflow-x: auto; overflow-y: hidden; padding: .5em 0; }
@@ -1260,6 +1280,23 @@ html[data-theme="dark"] .article .shiki span { color: var(--shiki-dark) !importa
   box-shadow: var(--shadow-lg);
 }
 .mmd-full-overlay .mmd-view { flex: 1; }
+
+/* code blocks & tables can also fill the screen */
+.full-overlay .code-wrap, .full-overlay .table-wrap {
+  margin: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  background: var(--bg-elev);
+  box-shadow: var(--shadow-lg);
+  overflow: hidden;
+}
+.full-overlay .code-wrap pre, .full-overlay .table-wrap .table-scroll {
+  flex: 1;
+  overflow: auto;
+}
+.full-overlay .code-wrap pre { margin: 0; }
 
 /* ── command palette ─────────────────────────────────────── */
 .palette-overlay {
@@ -1602,6 +1639,7 @@ details.dir > summary.drop-into {
   <aside class="toc" id="toc"></aside>
 </div>
 
+<div class="mmd-full-overlay full-overlay" id="full-overlay"></div>
 <div class="palette-overlay" id="palette-overlay">
   <div class="palette" role="dialog" aria-modal="true">
     <div class="palette-in">
@@ -1837,8 +1875,22 @@ const renderer = {
     const safe = text.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
     return '<div class="code-wrap" data-lang="'+esc(language)+'">'+
       '<div class="code-head"><span class="code-lang">'+esc(label)+'</span>'+
-      '<button class="copy-btn" type="button">'+copyIcon()+'Copy</button></div>'+
+      '<div class="code-tools">'+
+        '<button class="code-btn" data-code="full" type="button" title="Fullscreen (f)">'+expandIcon()+'</button>'+
+        '<button class="copy-btn" type="button">'+copyIcon()+'Copy</button>'+
+      '</div></div>'+
       '<pre class="raw-code"><code>'+safe+'</code></pre></div>';
+  },
+  table({ header, rows }) {
+    // Wrap in scrollable container with fullscreen option
+    const head = header.map(h => '<th>'+h.text+'</th>').join('');
+    const body = rows.map(r => '<tr>'+r.map(c => '<td>'+c.text+'</td>').join('')+'</tr>').join('');
+    return '<div class="table-wrap">'+
+      '<div class="code-head"><span class="code-lang">table</span>'+
+      '<div class="code-tools">'+
+        '<button class="code-btn" data-code="full" type="button" title="Fullscreen (f)">'+expandIcon()+'</button>'+
+      '</div></div>'+
+      '<div class="table-scroll"><table><thead><tr>'+head+'</tr></thead><tbody>'+body+'</tbody></table></div></div>';
   },
   image({ href, title, text }) {
     const src = rewriteAsset(href);
@@ -2110,18 +2162,66 @@ function copyIcon() {
 function bindCopyButtons(root) {
   (root || content).querySelectorAll(".code-wrap").forEach((wrap) => {
     const btn = wrap.querySelector(".copy-btn");
-    if (!btn) return;
-    btn.onclick = () => {
-      const pre = wrap.querySelector("pre");
-      const text = pre ? pre.innerText : "";
-      navigator.clipboard.writeText(text).then(() => {
-        btn.innerHTML = copyIcon() + "Copied";
-        btn.classList.add("done");
-        setTimeout(() => { btn.innerHTML = copyIcon() + "Copy"; btn.classList.remove("done"); }, 1400);
-      });
-    };
+    if (btn) {
+      btn.onclick = () => {
+        const pre = wrap.querySelector("pre");
+        const text = pre ? pre.innerText : "";
+        navigator.clipboard.writeText(text).then(() => {
+          btn.innerHTML = copyIcon() + "Copied";
+          btn.classList.add("done");
+          setTimeout(() => { btn.innerHTML = copyIcon() + "Copy"; btn.classList.remove("done"); }, 1400);
+        });
+      };
+    }
+    bindFullscreen(wrap);
   });
+  (root || content).querySelectorAll(".table-wrap").forEach(bindFullscreen);
 }
+
+// ── generic fullscreen for code blocks & tables ───────────
+let fullEl = null;
+const fullOverlay = $("full-overlay");
+fullOverlay.addEventListener("click", (e) => { if (e.target === fullOverlay && fullEl) exitFull(); });
+
+function bindFullscreen(wrap) {
+  const btn = wrap.querySelector('[data-code="full"]');
+  if (!btn) return;
+  btn.onclick = () => {
+    if (fullEl === wrap) exitFull();
+    else enterFull(wrap);
+  };
+}
+
+function enterFull(el) {
+  if (fullEl) exitFull();
+  const holder = document.createElement("div");
+  el.parentNode.insertBefore(holder, el);
+  fullOverlay.appendChild(el);
+  fullOverlay.classList.add("open");
+  document.body.style.overflow = "hidden";
+  fullEl = el;
+  el.__fullHolder = holder;
+  const btn = el.querySelector('[data-code="full"]');
+  if (btn) { btn.innerHTML = collapseIcon(); btn.title = "Exit fullscreen (esc)"; }
+}
+
+function exitFull() {
+  if (!fullEl) return;
+  fullOverlay.classList.remove("open");
+  document.body.style.overflow = "";
+  const holder = fullEl.__fullHolder;
+  if (holder && holder.parentNode) holder.parentNode.replaceChild(fullEl, holder);
+  else fullEl.remove();
+  const btn = fullEl.querySelector('[data-code="full"]');
+  if (btn) { btn.innerHTML = expandIcon(); btn.title = "Fullscreen (f)"; }
+  fullEl = null;
+}
+
+// keyboard: f to toggle, esc to exit
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && fullEl) { e.preventDefault(); exitFull(); return; }
+  if ((e.key === "f" || e.key === "F") && fullEl) { e.preventDefault(); exitFull(); return; }
+});
 function pencilIcon() {
   return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>';
 }
