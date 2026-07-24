@@ -28,7 +28,7 @@ Commands:
 Options:
   -p, --print        Print to stdout instead of the interactive viewer
   --ui <md|noir>     UI mode (default: md). Alias: MD_UI_MODE env
-  --port <n>         Port for serve (default: 4321)
+  --port <n>         Port for serve (default: 9876)
   --host <addr>      Host for serve (default: 127.0.0.1)
   --no-open          Do not open a browser on serve
   -v, --version      Print the version
