@@ -1182,7 +1182,7 @@ html[data-theme="dark"] .json-null { color: #f87171; }
   line-height: 1.65;
   font-family: var(--font-mono);
 }
-.article .shiki { background: transparent !important; }
+.article .shiki, .full-overlay .shiki { background: transparent !important; }
 html[data-theme="dark"] .article .shiki,
 html[data-theme="dark"] .article .shiki span,
 html[data-theme="dark"] .full-overlay .shiki,
