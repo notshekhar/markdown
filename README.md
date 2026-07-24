@@ -32,10 +32,25 @@ markdown <dir>           # browse under <dir>
 markdown <file.md>       # open a markdown file in the interactive viewer
 markdown <file.tex>      # open a LaTeX file as a readable preview
 markdown <file> -p       # print rendered output and exit (also used when piped)
+markdown serve [path]    # web preview in the browser (light + dark themes)
 
 markdown update          # update to the latest version (alias: upgrade)
 markdown version         # print the version
 ```
+
+### Web serve
+
+```bash
+markdown serve                 # cwd — opens browser
+markdown serve ./docs          # folder
+markdown serve README.md       # single file
+markdown serve --port 8080     # pick port
+markdown serve --no-open       # print URL only
+```
+
+Same features as the terminal renderer: GFM markdown, code highlighting,
+KaTeX math, mermaid diagrams, and `.tex` → readable preview. Header toggle
+switches light/dark (saved in `localStorage`).
 
 The command is `markdown` (a `md` alias is also installed, but many shells
 already alias `md` to `mkdir`, which would shadow it).

@@ -7,6 +7,7 @@ import { prewarmHighlighter } from "./highlight.ts";
 import { docKind } from "./file-list.ts";
 import { getVersion, runUpgrade } from "./commands.ts";
 import { resolveUiModeFromEnv, setActiveUiMode } from "./ui-mode.ts";
+import { runServe } from "./serve.ts";
 
 const HELP = `markdown — render markdown (and tex) in your terminal
 
@@ -16,8 +17,10 @@ Usage:
   markdown <file.md>       Open a markdown file in the interactive viewer
   markdown <file.tex>      Open a LaTeX file as a readable preview (no TeX engine)
   markdown <file> -p       Print the rendered file and exit (no UI)
+  markdown serve [path]    Start a local web preview (opens browser)
 
 Commands:
+  serve [path]             Web preview with light/dark themes (default: .)
   update, upgrade          Update to the latest version
   version                  Print the version
   help                     Show this help
@@ -25,6 +28,9 @@ Commands:
 Options:
   -p, --print        Print to stdout instead of the interactive viewer
   --ui <md|noir>     UI mode (default: md). Alias: MD_UI_MODE env
+  --port <n>         Port for serve (default: 4321)
+  --host <addr>      Host for serve (default: 127.0.0.1)
+  --no-open          Do not open a browser on serve
   -v, --version      Print the version
   -h, --help         Show this help
 
@@ -36,7 +42,14 @@ Interactive keys:
 
 UI modes (like loop):
   md     classic cyan header, no canvas wash (default)
-  noir   dark cockpit: OSC 11 wash, ◆ header, ┃ gutters`;
+  noir   dark cockpit: OSC 11 wash, ◆ header, ┃ gutters
+
+Web serve:
+  markdown serve                 preview cwd in the browser
+  markdown serve ./docs          preview a folder
+  markdown serve README.md       open one file
+  markdown serve --port 8080     pick a port
+  light/dark toggle in the header (remembers preference)`;
 
 async function main(): Promise<void> {
     const args = process.argv.slice(2);
@@ -52,6 +65,43 @@ async function main(): Promise<void> {
 
     // Subcommands (mirrors pi: update/upgrade/version/help).
     switch (args[0]) {
+        case "serve": {
+            const serveArgs = args.slice(1);
+            let port: number | undefined;
+            let host: string | undefined;
+            let open = true;
+            const rest: string[] = [];
+            for (let i = 0; i < serveArgs.length; i++) {
+                const a = serveArgs[i];
+                if (a === "--port" && serveArgs[i + 1]) {
+                    port = Number(serveArgs[++i]);
+                } else if (a.startsWith("--port=")) {
+                    port = Number(a.slice("--port=".length));
+                } else if (a === "--host" && serveArgs[i + 1]) {
+                    host = serveArgs[++i];
+                } else if (a.startsWith("--host=")) {
+                    host = a.slice("--host=".length);
+                } else if (a === "--no-open") {
+                    open = false;
+                } else if (a === "-h" || a === "--help") {
+                    process.stdout.write(`${HELP}\n`);
+                    return;
+                } else if (!a.startsWith("-")) {
+                    rest.push(a);
+                }
+            }
+            if (port !== undefined && (!Number.isFinite(port) || port <= 0)) {
+                process.stderr.write("md: invalid --port\n");
+                process.exit(1);
+            }
+            await runServe({
+                root: rest[0] ? resolve(rest[0]) : process.cwd(),
+                port,
+                host,
+                open,
+            });
+            return;
+        }
         case "update":
         case "upgrade":
             runUpgrade({ force: args.includes("--force") });
@@ -77,10 +127,11 @@ async function main(): Promise<void> {
     }
     setActiveUiMode(resolveUiModeFromEnv(uiFlag));
 
+    const flagTakesValue = new Set(["--ui", "--port", "--host"]);
     const positional = args.filter(
         (arg, i) =>
             !arg.startsWith("-") &&
-            args[i - 1] !== "--ui",
+            !flagTakesValue.has(args[i - 1] ?? ""),
     );
     const target = positional[0] ? resolve(positional[0]) : process.cwd();
 
