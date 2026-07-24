@@ -588,6 +588,9 @@ body > * { position: relative; z-index: 1; }
 }
 .tab:hover { background: var(--bg-hover); color: var(--fg); }
 .tab.active { background: var(--bg-elev); color: var(--fg); border-color: var(--border); box-shadow: var(--shadow-lg); }
+.tab.dragging { opacity: .45; }
+.tab.drop-before { box-shadow: inset 3px 0 0 var(--accent); }
+.tab.drop-after { box-shadow: inset -3px 0 0 var(--accent); }
 .tab .t-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--fg-faint); flex-shrink: 0; opacity: .5; }
 .tab.tex .t-dot { background: #d9a441; opacity: .9; }
 .tab.dirty .t-dot { background: var(--accent); opacity: 1; }
@@ -1542,12 +1545,24 @@ function runMermaid(el) {
 function enrich(el) { renderMathIn(el); runMermaid(el); bindCopyButtons(el); highlightCode(el); }
 
 // ── tabs (multi-buffer) ────────────────────────────────────
+let dragPath = null;
+function reorderBuffers(fromPath, toPath, before) {
+  if (fromPath === toPath) return;
+  const from = buffers.findIndex((b) => b.path === fromPath);
+  if (from < 0) return;
+  const [moved] = buffers.splice(from, 1);
+  let to = buffers.findIndex((b) => b.path === toPath);
+  if (to < 0) buffers.push(moved);
+  else buffers.splice(before ? to : to + 1, 0, moved);
+  renderTabs();
+  saveBuffers();
+}
 function renderTabs() {
   document.documentElement.classList.toggle("has-tabs", buffers.length > 0);
   if (!buffers.length) { tabsEl.innerHTML = ""; return; }
   tabsEl.innerHTML = buffers.map((b) => {
     const cls = "tab" + (b.path === activePath ? " active" : "") + (b.kind === "tex" ? " tex" : "") + (b.dirty ? " dirty" : "");
-    return '<div class="'+cls+'" data-path="'+esc(b.path)+'" title="'+esc(b.path)+'">'+
+    return '<div class="'+cls+'" draggable="true" data-path="'+esc(b.path)+'" title="'+esc(b.path)+'">'+
       '<span class="t-dot"></span><span class="t-name">'+esc(b.name)+'</span>'+
       '<button class="t-close" title="Close (⌘W)"><span class="x">×</span><span class="d">●</span></button></div>';
   }).join("");
@@ -1557,6 +1572,34 @@ function renderTabs() {
     el.onauxclick = (e) => { if (e.button === 1) { e.preventDefault(); closeBuffer(p); } };
     const close = el.querySelector(".t-close");
     if (close) close.onclick = (e) => { e.stopPropagation(); closeBuffer(p); };
+    // drag-to-reorder (VS Code style)
+    el.ondragstart = (e) => {
+      dragPath = p;
+      el.classList.add("dragging");
+      if (e.dataTransfer) { e.dataTransfer.effectAllowed = "move"; try { e.dataTransfer.setData("text/plain", p); } catch {} }
+    };
+    el.ondragend = () => {
+      dragPath = null;
+      tabsEl.querySelectorAll(".tab").forEach((t) => t.classList.remove("dragging", "drop-before", "drop-after"));
+    };
+    el.ondragover = (e) => {
+      if (!dragPath || dragPath === p) return;
+      e.preventDefault();
+      if (e.dataTransfer) e.dataTransfer.dropEffect = "move";
+      const r = el.getBoundingClientRect();
+      const before = e.clientX < r.left + r.width / 2;
+      el.classList.toggle("drop-before", before);
+      el.classList.toggle("drop-after", !before);
+    };
+    el.ondragleave = () => el.classList.remove("drop-before", "drop-after");
+    el.ondrop = (e) => {
+      e.preventDefault();
+      const before = el.classList.contains("drop-before");
+      el.classList.remove("drop-before", "drop-after");
+      const from = dragPath;
+      dragPath = null;
+      if (from && from !== p) reorderBuffers(from, p, before);
+    };
   });
   const active = tabsEl.querySelector(".tab.active");
   if (active) active.scrollIntoView({ block: "nearest", inline: "nearest" });

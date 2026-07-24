@@ -1,6 +1,6 @@
 {
     "name": "markdown",
-    "version": "0.5.2",
+    "version": "0.5.3",
     "description": "md — render markdown (and tex) in your terminal or browser with syntax highlighting, math, mermaid, and UI modes.",
     "type": "module",
     "license": "MIT",
