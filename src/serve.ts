@@ -1121,52 +1121,106 @@ textarea.ed-input {
 .table-scroll { overflow: auto; max-height: 70vh; }
 /* ── json tree viewer ────────────────────────────────────── */
 .json-tree {
-  padding: 1rem 1.15rem;
+  padding: .75rem 1rem .9rem;
   font-family: var(--font-mono);
-  font-size: .84rem;
-  line-height: 1.65;
+  font-size: .815rem;
+  line-height: 1.45;
   overflow: auto;
   max-height: 70vh;
+  color: var(--fg);
+}
+.code-wrap[data-json-mode="raw"] .json-tree { display: none; }
+.code-wrap[data-json-mode="tree"] > pre { display: none; }
+.json-row {
+  display: block;
+  min-width: 0;
+  padding: .02rem 0;
+}
+.json-tree > .json-node { display: block; width: 100%; }
+.json-node {
+  display: inline-block;
+  vertical-align: top;
+  min-width: 0;
+  max-width: 100%;
 }
 .json-node > summary {
   cursor: pointer;
   list-style: none;
   user-select: none;
+  display: inline-flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0 .2rem;
+  border-radius: 0;
+  padding: .05rem .15rem .05rem 0;
 }
+.json-node > summary:hover { background: var(--bg-hover); }
 .json-node > summary::-webkit-details-marker { display: none; }
 .json-node > summary::before {
   content: "";
   display: inline-block;
   width: 0; height: 0;
-  margin-right: .35rem;
+  margin-right: .3rem;
   border-left: 5px solid var(--fg-faint);
   border-top: 4px solid transparent;
   border-bottom: 4px solid transparent;
-  transition: transform .12s;
+  transition: transform .1s ease;
+  flex-shrink: 0;
+  position: relative;
+  top: .05em;
 }
 .json-node[open] > summary::before { transform: rotate(90deg); }
-.json-node:not([open]) > summary .json-kids { display: none; }
-.json-count {
-  margin: 0 .3rem;
-  padding: 0 .35rem;
-  font-size: .68rem;
-  color: var(--fg-faint);
-  background: var(--bg-hover);
-}
-.json-node[open] > summary .json-count { display: none; }
 .json-brk { color: var(--fg-faint); }
-.json-kids { margin-left: .55rem; padding-left: .85rem; border-left: 1px solid var(--border-soft); }
-.json-key { color: var(--accent); margin-right: .45rem; }
-.json-key::after { content: ":"; color: var(--fg-faint); }
-.json-string { color: #16a34a; }
-.json-number { color: #2563eb; }
-.json-boolean { color: #d97706; }
-.json-null { color: #dc2626; font-style: italic; }
+.json-preview { color: var(--fg-muted); }
+.json-preview .json-pkey { color: var(--json-key); }
+.json-preview .json-ellipsis,
+.json-preview .json-sep { color: var(--fg-faint); }
+.json-count {
+  color: var(--fg-faint);
+  font-size: .72rem;
+}
+.json-node[open] > summary .json-preview,
+.json-node[open] > summary .json-count,
+.json-node[open] > summary .json-brk:last-of-type { display: none; }
+.json-kids {
+  display: none;
+  margin: .05rem 0 .05rem .55rem;
+  padding-left: .75rem;
+  border-left: 1px solid var(--border-soft);
+}
+.json-node[open] > .json-kids { display: block; }
+.json-end { display: none; color: var(--fg-faint); }
+.json-node[open] > .json-end { display: block; }
+.json-key { color: var(--json-key); }
+.json-key::after { content: ":"; color: var(--fg-faint); margin: 0 .4rem 0 .05rem; }
+.json-idx { color: var(--fg-faint); font-variant-numeric: tabular-nums; }
+.json-idx::after { content: ":"; color: var(--fg-faint); margin: 0 .4rem 0 .05rem; }
+.json-string { color: var(--json-str); word-break: break-word; }
+.json-number { color: var(--json-num); }
+.json-boolean { color: var(--json-bool); }
+.json-null { color: var(--json-null); font-style: italic; }
 .json-empty { color: var(--fg-faint); }
-html[data-theme="dark"] .json-string { color: #4ade80; }
-html[data-theme="dark"] .json-number { color: #60a5fa; }
-html[data-theme="dark"] .json-boolean { color: #fbbf24; }
-html[data-theme="dark"] .json-null { color: #f87171; }
+.json-tools-sep {
+  width: 1px;
+  height: 14px;
+  background: var(--code-border);
+  margin: 0 .15rem;
+  flex-shrink: 0;
+}
+:root, [data-theme="dark"] {
+  --json-key: oklch(0.82 0.08 200);
+  --json-str: oklch(0.78 0.14 145);
+  --json-num: oklch(0.78 0.12 250);
+  --json-bool: oklch(0.82 0.14 75);
+  --json-null: oklch(0.72 0.14 25);
+}
+[data-theme="light"] {
+  --json-key: oklch(0.45 0.1 220);
+  --json-str: oklch(0.42 0.12 145);
+  --json-num: oklch(0.45 0.14 255);
+  --json-bool: oklch(0.5 0.12 55);
+  --json-null: oklch(0.5 0.14 25);
+}
 .article pre {
   margin: 0;
   padding: 1rem 1.15rem;
@@ -2332,7 +2386,8 @@ async function highlightCode(root) {
   const wraps = Array.from(scope.querySelectorAll(".code-wrap"));
   for (const wrap of wraps) {
     if (run !== highlightRun) return; // a newer render superseded us
-    if (wrap.__jsonTree) continue; // json blocks show the interactive tree instead
+    // json tree mode hides the pre — only highlight when raw is showing (or not a tree)
+    if (wrap.__jsonTree && wrap.dataset.jsonMode !== "raw") continue;
     const pre = wrap.querySelector("pre.raw-code");
     if (!pre) continue;
     const codeEl = pre.querySelector("code");
@@ -2600,60 +2655,164 @@ function bindDiagramTools(card, ctl) {
 }
 function fitCheckIcon() { return svgIcon('<path d="M20 6L9 17l-5-5"/>'); }
 
-// ── json: interactive tree, expanded by default ───────────
-// JSON code blocks render as a collapsible <details> tree. The raw <pre> stays
-// in the DOM (hidden) so the copy button and shiki keep working.
+// ── json: interactive tree viewer ─────────────────────────
+// Valid fenced json blocks become a collapsible tree (devtools-style).
+// Raw <pre> stays in the DOM for copy + "Raw" mode; shiki runs when toggled.
+const JSON_OPEN_DEPTH = 2; // root + one level open by default
+
 function renderJsonViews(root) {
   (root || content).querySelectorAll('.code-wrap[data-lang="json"]').forEach((wrap) => {
     if (wrap.__jsonTree) return;
-    const code = wrap.querySelector("pre code");
+    const code = wrap.querySelector("pre code") || wrap.querySelector("pre");
     const raw = code ? code.textContent : "";
     let data;
-    try { data = JSON.parse(raw); } catch { return; } // not valid json — leave as code
+    try { data = JSON.parse(raw); } catch { return; } // invalid — leave as code
     wrap.__jsonTree = true;
+    wrap.dataset.jsonMode = "tree";
     const pre = wrap.querySelector("pre");
-    if (pre) pre.style.display = "none";
     const tree = document.createElement("div");
     tree.className = "json-tree";
-    tree.appendChild(jsonNode(data));
+    tree.appendChild(jsonNode(data, 0));
     if (pre) pre.after(tree); else wrap.appendChild(tree);
+    bindJsonTools(wrap, tree);
   });
 }
+
+function bindJsonTools(wrap, tree) {
+  const tools = wrap.querySelector(".code-tools");
+  if (!tools || tools.querySelector("[data-json]")) return;
+  const mk = (act, title, label) => {
+    const b = document.createElement("button");
+    b.className = "code-btn";
+    b.type = "button";
+    b.setAttribute("data-json", act);
+    b.title = title;
+    b.textContent = label;
+    b.style.width = "auto";
+    b.style.padding = "0 .45rem";
+    b.style.fontSize = ".68rem";
+    b.style.fontFamily = "var(--font-mono)";
+    b.style.letterSpacing = ".04em";
+    b.style.textTransform = "uppercase";
+    return b;
+  };
+  const modeBtn = mk("mode", "Show raw JSON", "Raw");
+  const expandBtn = mk("expand", "Expand all", "+");
+  const collapseBtn = mk("collapse", "Collapse all", "−");
+  const sep = document.createElement("span");
+  sep.className = "json-tools-sep";
+  sep.setAttribute("data-json", "sep");
+  const full = tools.querySelector('[data-code="full"]');
+  const insertBefore = full || tools.firstChild;
+  [expandBtn, collapseBtn, sep, modeBtn].forEach((b) => tools.insertBefore(b, insertBefore));
+
+  const setMode = (mode) => {
+    wrap.dataset.jsonMode = mode;
+    const treeMode = mode === "tree";
+    modeBtn.textContent = treeMode ? "Raw" : "Tree";
+    modeBtn.title = treeMode ? "Show raw JSON" : "Show interactive tree";
+    expandBtn.hidden = collapseBtn.hidden = sep.hidden = !treeMode;
+    if (!treeMode) highlightCode(wrap);
+  };
+  modeBtn.onclick = () => setMode(wrap.dataset.jsonMode === "tree" ? "raw" : "tree");
+  expandBtn.onclick = () => tree.querySelectorAll("details.json-node").forEach((d) => { d.open = true; });
+  collapseBtn.onclick = () => tree.querySelectorAll("details.json-node").forEach((d) => { d.open = false; });
+  setMode("tree");
+}
+
 function jsonLeaf(text, type) {
   const s = document.createElement("span");
   s.className = "json-val json-" + type;
   s.textContent = text;
   return s;
 }
-function jsonRow(key, v) {
+function jsonEsc(s) {
+  return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;");
+}
+function jsonPreview(v, isArr, keys) {
+  const max = 42;
+  if (isArr) {
+    const n = keys.length;
+    if (!n) return "[]";
+    // short primitive arrays: show values; else count
+    const sample = [];
+    let len = 2; // "[]"
+    for (let i = 0; i < Math.min(n, 6); i++) {
+      const item = v[i];
+      let bit;
+      if (item === null) bit = "null";
+      else if (typeof item === "string") bit = JSON.stringify(item.length > 12 ? item.slice(0, 12) + "…" : item);
+      else if (typeof item === "number" || typeof item === "boolean") bit = String(item);
+      else return '<span class="json-count">' + n + (n === 1 ? " item" : " items") + "</span>";
+      if (len + bit.length + 2 > max) {
+        sample.push('<span class="json-ellipsis">…</span>');
+        break;
+      }
+      sample.push(jsonEsc(bit));
+      len += bit.length + 2;
+    }
+    if (sample.length < n && !sample[sample.length - 1].includes("ellipsis")) {
+      sample.push('<span class="json-ellipsis">…</span>');
+    }
+    return sample.join('<span class="json-sep">, </span>');
+  }
+  const parts = [];
+  let len = 2;
+  for (let i = 0; i < keys.length; i++) {
+    const k = keys[i];
+    const piece = '<span class="json-pkey">' + jsonEsc(k) + "</span>";
+    if (len + k.length + 2 > max) {
+      parts.push('<span class="json-ellipsis">…</span>');
+      break;
+    }
+    parts.push(piece);
+    len += k.length + 2;
+  }
+  if (!parts.length) return "";
+  return parts.join('<span class="json-sep">, </span>');
+}
+function jsonRow(key, v, depth, isArr) {
   const row = document.createElement("div");
   row.className = "json-row";
   const k = document.createElement("span");
-  k.className = "json-key";
+  k.className = isArr ? "json-idx" : "json-key";
   k.textContent = key;
   row.appendChild(k);
-  row.appendChild(jsonNode(v));
+  row.appendChild(jsonNode(v, depth));
   return row;
 }
-function jsonNode(v) {
+function jsonNode(v, depth) {
   if (v === null) return jsonLeaf("null", "null");
-  const t = Array.isArray(v) ? "array" : typeof v;
+  const isArr = Array.isArray(v);
+  const t = isArr ? "array" : typeof v;
   if (t !== "object" && t !== "array") {
     return jsonLeaf(t === "string" ? JSON.stringify(v) : String(v), t);
   }
-  const keys = t === "array" ? v.map((_, i) => String(i)) : Object.keys(v);
-  if (!keys.length) return jsonLeaf(t === "array" ? "[]" : "{}", "empty");
+  const keys = isArr ? v.map((_, i) => String(i)) : Object.keys(v);
+  if (!keys.length) return jsonLeaf(isArr ? "[]" : "{}", "empty");
+
   const d = document.createElement("details");
   d.className = "json-node";
-  d.open = true;
+  d.open = depth < JSON_OPEN_DEPTH;
+
+  const open = isArr ? "[" : "{";
+  const close = isArr ? "]" : "}";
   const s = document.createElement("summary");
-  const open = t === "array" ? "[" : "{", close = t === "array" ? "]" : "}";
-  s.innerHTML = '<span class="json-brk">'+open+'</span><span class="json-count">'+keys.length+'</span><span class="json-brk json-close">'+close+'</span>';
+  s.innerHTML =
+    '<span class="json-brk">' + open + "</span>" +
+    '<span class="json-preview">' + jsonPreview(v, isArr, keys) + "</span>" +
+    '<span class="json-brk">' + close + "</span>";
   d.appendChild(s);
+
   const kids = document.createElement("div");
   kids.className = "json-kids";
-  keys.forEach((k) => kids.appendChild(jsonRow(k, v[k])));
+  keys.forEach((k, i) => kids.appendChild(jsonRow(k, isArr ? v[i] : v[k], depth + 1, isArr)));
   d.appendChild(kids);
+
+  const end = document.createElement("span");
+  end.className = "json-end";
+  end.textContent = close;
+  d.appendChild(end);
   return d;
 }
 
